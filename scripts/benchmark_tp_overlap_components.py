@@ -20,6 +20,7 @@ def main() -> int:
     parser.add_argument("--top-k", type=int, default=8)
     parser.add_argument("--N-per-rank", type=int, default=1536)
     parser.add_argument("--gemm-block-m", type=int, default=128)
+    parser.add_argument("--gemm-block-n", type=int, default=64)
     parser.add_argument("--gemm-group-size-m", type=int, default=1)
     parser.add_argument("--gemm-num-warps", type=int, default=8)
     parser.add_argument("--gemm-num-stages", type=int, default=2)
@@ -126,8 +127,9 @@ def main() -> int:
             num_ranks=ctx.world_size,
             num_local_ranks=ctx.world_size,
             BLOCK_K_QUANT=128,
+            BLOCK_N_QUANT=128,
             BLOCK_SIZE_M=args.gemm_block_m,
-            BLOCK_SIZE_N=128,
+            BLOCK_SIZE_N=args.gemm_block_n,
             BLOCK_SIZE_K=128,
             GROUP_SIZE_M=args.gemm_group_size_m,
             stages=args.gemm_num_stages,
@@ -226,7 +228,7 @@ def main() -> int:
                 },
                 "consumer_config": {
                     "block_m": args.gemm_block_m,
-                    "block_n": 128,
+                    "block_n": args.gemm_block_n,
                     "block_k": 128,
                     "group_size_m": args.gemm_group_size_m,
                     "num_warps": args.gemm_num_warps,

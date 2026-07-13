@@ -63,6 +63,7 @@ echo "zip_path=${ZIP_PATH}"
 echo "branch=$(git -C "${ROOT}" branch --show-current)"
 echo "gpus=${GPUS} selection=${GPU_SELECTION} nproc=${NPROC}"
 echo "comparison=b2_vs_c4 CUDA_DEVICE_MAX_CONNECTIONS=${CUDA_DEVICE_MAX_CONNECTIONS-unset}"
+echo "c4_consumer_candidate=BLOCK_M128_BLOCK_N64_WARPS8_STAGES2"
 echo "nvshmem_home=${NVSHMEM_HOME}"
 echo "triton_cache_dir=${TRITON_CACHE_DIR} tmpdir=${TMPDIR}"
 
@@ -133,6 +134,7 @@ torchrun \
   --master_port="$((MASTER_PORT + 1))" \
   "${ROOT}/scripts/benchmark_tp_overlap_components.py" \
   --output "${SUITE_DIR}/analysis/component_benchmarks.json" \
+  --gemm-block-n 64 \
   --warmup "${SWEEP_WARMUP}" \
   --repeat "${SWEEP_REPEAT}"
 
@@ -171,15 +173,15 @@ if [[ "${RUN_SWEEPS}" == "1" ]]; then
     --set "schemes.enabled=[c4]" \
     --set "shape.shared_experts=0" \
     --set 'sweep_axes=[{"path":"schemes.c4.tunables.gemm_num_stages","values":[2,3,4]}]'
-elif [[ "${RUN_SWEEPS}" != "joint" ]]; then
+elif [[ "${RUN_SWEEPS}" != "joint" && "${RUN_SWEEPS}" != "gemm" ]]; then
   echo "RUN_SWEEPS=${RUN_SWEEPS}; diagnostic sweeps skipped"
 fi
 
-if [[ "${RUN_SWEEPS}" == "1" || "${RUN_SWEEPS}" == "joint" ]]; then
-  run_case "${STAMP}_c4_gate_joint_sweep" "${SWEEP_WARMUP}" "${SWEEP_REPEAT}" \
+if [[ "${RUN_SWEEPS}" == "1" || "${RUN_SWEEPS}" == "joint" || "${RUN_SWEEPS}" == "gemm" ]]; then
+  run_case "${STAMP}_c4_gate_occupancy_sweep" "${SWEEP_WARMUP}" "${SWEEP_REPEAT}" \
     --set "schemes.enabled=[c4]" \
     --set "shape.shared_experts=0" \
-    --set 'sweep_axes=[{"path":"schemes.c4.tunables.gemm_block_m","values":[64,128]},{"path":"schemes.c4.tunables.gemm_num_warps","values":[4,8]},{"path":"schemes.c4.tunables.gemm_num_stages","values":[2,4]},{"path":"schemes.c4.tunables.gemm_group_size_m","values":[1,8]}]'
+    --set 'sweep_axes=[{"path":"schemes.c4.tunables.gemm_block_m","values":[64,128]},{"path":"schemes.c4.tunables.gemm_block_n","values":[32,64,128]},{"path":"schemes.c4.tunables.gemm_num_warps","values":[4,8]},{"path":"schemes.c4.tunables.gemm_num_stages","values":[1,2]}]'
 fi
 
 echo "[5/6] Profiles"
@@ -196,7 +198,9 @@ fi
 
 run_nsys_case() {
   local scheme="$1"
-  local output="${SUITE_DIR}/profiles/nsys/${scheme}_steady_state"
+  local label="$2"
+  shift 2
+  local output="${SUITE_DIR}/profiles/nsys/${label}_steady_state"
   local nsys_args=(
     profile
     --force-overwrite=true
@@ -212,13 +216,14 @@ run_nsys_case() {
   echo "NSYS scheme=${scheme} output=${output}.nsys-rep"
   if ! nsys "${nsys_args[@]}" python -m moe_bench.cli "${ROOT}/${CONFIG}" \
       "${common_overrides[@]}" \
-      --set "run.tag=${STAMP}_nsys_${scheme}" \
+      --set "run.tag=${STAMP}_nsys_${label}" \
       --set "run.warmup=5" \
       --set "run.repeat=5" \
       --set "schemes.enabled=[${scheme}]" \
       --set "shape.shared_experts=0" \
       --set "env.MOE_BENCH_NSYS_CAPTURE=1" \
       --set "env.MOE_BENCH_PROFILE_ITERS=${PROFILE_ITERS}" \
+      "$@" \
       2>&1 | tee "${output}_console.log"; then
     echo "WARNING: nsys capture failed for ${scheme}"
     echo "nsys capture failed" > "${output}_FAILED.txt"
@@ -241,8 +246,11 @@ run_nsys_case() {
 
 if [[ "${RUN_NSYS}" == "1" ]]; then
   if command -v nsys >/dev/null 2>&1; then
-    run_nsys_case c4
-    run_nsys_case b2
+    run_nsys_case c4 c4
+    if [[ "${RUN_SWEEPS}" == "gemm" ]]; then
+      run_nsys_case c4 c4_bn128 --set "schemes.c4.tunables.gemm_block_n=128"
+    fi
+    run_nsys_case b2 b2
   else
     echo "WARNING: nsys is unavailable; torch profiles are still included"
     echo "nsys command not found" > "${SUITE_DIR}/profiles/nsys/MISSING.txt"

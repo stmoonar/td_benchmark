@@ -106,3 +106,27 @@ def test_render_includes_ready_no_wait_comparison() -> None:
 
     assert "Ready/no-wait output parity" in markdown
     assert "+0.012500 ms" in markdown
+
+
+def test_render_distinguishes_nsys_profile_variants() -> None:
+    resources = {
+        "gpu": {"name": "GPU", "compute_capability": "10.0", "sm_count": 1},
+        "kernels": [
+            {
+                "profile": "c4_bn64",
+                "scheme": "c4",
+                "name": "fp8_kernel_consumer_ag_group_gemm",
+                "average_us": 100.0,
+                "grid_x": 2,
+                "block_threads": 128,
+                "registers_per_thread": 128,
+                "dynamic_smem_bytes": 49152,
+                "resource_limited_blocks_per_sm": 2,
+                "launch_waves": 1.0,
+            }
+        ],
+    }
+
+    markdown = render_markdown([], nsys_resources=resources)
+
+    assert "| c4_bn64 | c4 |" in markdown

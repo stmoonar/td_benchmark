@@ -76,6 +76,7 @@ def test_investigation_config_uses_best_joint_gate_configuration():
     c4 = next(scheme for scheme in cfg.schemes if scheme.code == "c4")
 
     assert c4.tunables["gemm_block_m"] == 128
+    assert c4.tunables["gemm_block_n"] == 64
     assert c4.tunables["gemm_group_size_m"] == 1
     assert c4.tunables["gemm_num_warps"] == 8
     assert c4.tunables["gemm_num_stages"] == 2
@@ -88,3 +89,12 @@ def test_production_consumer_keeps_wait_enabled():
 
     assert "WAIT_FOR_AG=wait_for_ag" in source
     assert "wait_for_ag=True" in source
+
+
+def test_fp8_consumer_accepts_split_n_quantization_tiles():
+    source = Path("moe_bench/tdx/kernels/fp8_allgather_group_gemm.py").read_text(
+        encoding="utf-8"
+    )
+
+    assert "self.BLOCK_N_QUANT % self.BLOCK_N == 0" in source
+    assert "ctx.BLOCK_N_QUANT" in source

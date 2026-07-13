@@ -29,7 +29,9 @@ schemes:
     tunables:
       n_chunks_rs: 32
       gemm_block_m: 128
-      gemm_block_n: 128
+      # Split each 128-wide weight quantization block into two consumer CTAs.
+      # This halves the live FP32 accumulator/partial and B-tile footprint.
+      gemm_block_n: 64
       gemm_block_k: 128
       gemm_group_size_m: 1
       gemm_num_warps: 8

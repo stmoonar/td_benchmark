@@ -171,34 +171,38 @@ def resource_limited_blocks_per_sm(
 def collect_nsys_kernel_resources(suite_dir: Path) -> dict[str, Any]:
     output: dict[str, Any] = {"gpu": {}, "kernels": []}
     for scheme, kernel_names in NSYS_KERNELS.items():
-        database = suite_dir / "profiles" / "nsys" / f"{scheme}_steady_state.sqlite"
-        if not database.is_file():
-            continue
-        with sqlite3.connect(database) as connection:
-            gpu_row = connection.execute(
-                """
-                SELECT name, smCount, maxRegistersPerSm, maxShmemPerSm,
-                       maxWarpsPerSm, maxBlocksPerSm, computeMajor, computeMinor
-                FROM TARGET_INFO_GPU LIMIT 1
-                """
-            ).fetchone()
-            if gpu_row is None:
-                continue
-            (
-                gpu_name, sm_count, max_registers, max_smem, max_warps,
-                max_blocks, compute_major, compute_minor,
-            ) = gpu_row
-            output["gpu"] = {
-                "name": gpu_name,
-                "sm_count": sm_count,
-                "max_registers_per_sm": max_registers,
-                "max_smem_per_sm": max_smem,
-                "max_warps_per_sm": max_warps,
-                "max_blocks_per_sm": max_blocks,
-                "compute_capability": f"{compute_major}.{compute_minor}",
-            }
-            placeholders = ",".join("?" for _ in kernel_names)
-            query = f"""
+        databases = sorted(
+            (suite_dir / "profiles" / "nsys").glob(
+                f"{scheme}*_steady_state.sqlite"
+            )
+        )
+        for database in databases:
+            profile = database.stem.removesuffix("_steady_state")
+            with sqlite3.connect(database) as connection:
+                gpu_row = connection.execute(
+                    """
+                    SELECT name, smCount, maxRegistersPerSm, maxShmemPerSm,
+                           maxWarpsPerSm, maxBlocksPerSm, computeMajor, computeMinor
+                    FROM TARGET_INFO_GPU LIMIT 1
+                    """
+                ).fetchone()
+                if gpu_row is None:
+                    continue
+                (
+                    gpu_name, sm_count, max_registers, max_smem, max_warps,
+                    max_blocks, compute_major, compute_minor,
+                ) = gpu_row
+                output["gpu"] = {
+                    "name": gpu_name,
+                    "sm_count": sm_count,
+                    "max_registers_per_sm": max_registers,
+                    "max_smem_per_sm": max_smem,
+                    "max_warps_per_sm": max_warps,
+                    "max_blocks_per_sm": max_blocks,
+                    "compute_capability": f"{compute_major}.{compute_minor}",
+                }
+                placeholders = ",".join("?" for _ in kernel_names)
+                query = f"""
                 SELECT strings.value, kernels.registersPerThread, kernels.gridX,
                        kernels.blockX, kernels.staticSharedMemory,
                        kernels.dynamicSharedMemory,
@@ -210,37 +214,38 @@ def collect_nsys_kernel_resources(suite_dir: Path) -> dict[str, Any]:
                          kernels.blockX, kernels.staticSharedMemory,
                          kernels.dynamicSharedMemory
                 ORDER BY strings.value
-            """
-            for row in connection.execute(query, sorted(kernel_names)):
-                (
-                    name, registers, grid_x, block_x, static_smem,
-                    dynamic_smem, average_us, instances,
-                ) = row
-                shared_memory = int(static_smem) + int(dynamic_smem)
-                active_blocks = resource_limited_blocks_per_sm(
-                    max_blocks_per_sm=int(max_blocks),
-                    max_warps_per_sm=int(max_warps),
-                    max_registers_per_sm=int(max_registers),
-                    max_smem_per_sm=int(max_smem),
-                    block_threads=int(block_x),
-                    registers_per_thread=int(registers),
-                    shared_memory=shared_memory,
-                )
-                output["kernels"].append(
-                    {
-                        "scheme": scheme,
-                        "name": name,
-                        "average_us": average_us,
-                        "instances": instances,
-                        "grid_x": grid_x,
-                        "block_threads": block_x,
-                        "registers_per_thread": registers,
-                        "static_smem_bytes": static_smem,
-                        "dynamic_smem_bytes": dynamic_smem,
-                        "resource_limited_blocks_per_sm": active_blocks,
-                        "launch_waves": grid_x / (sm_count * active_blocks),
-                    }
-                )
+                """
+                for row in connection.execute(query, sorted(kernel_names)):
+                    (
+                        name, registers, grid_x, block_x, static_smem,
+                        dynamic_smem, average_us, instances,
+                    ) = row
+                    shared_memory = int(static_smem) + int(dynamic_smem)
+                    active_blocks = resource_limited_blocks_per_sm(
+                        max_blocks_per_sm=int(max_blocks),
+                        max_warps_per_sm=int(max_warps),
+                        max_registers_per_sm=int(max_registers),
+                        max_smem_per_sm=int(max_smem),
+                        block_threads=int(block_x),
+                        registers_per_thread=int(registers),
+                        shared_memory=shared_memory,
+                    )
+                    output["kernels"].append(
+                        {
+                            "scheme": scheme,
+                            "profile": profile,
+                            "name": name,
+                            "average_us": average_us,
+                            "instances": instances,
+                            "grid_x": grid_x,
+                            "block_threads": block_x,
+                            "registers_per_thread": registers,
+                            "static_smem_bytes": static_smem,
+                            "dynamic_smem_bytes": dynamic_smem,
+                            "resource_limited_blocks_per_sm": active_blocks,
+                            "launch_waves": grid_x / (sm_count * active_blocks),
+                        }
+                    )
     return output
 
 
@@ -365,13 +370,18 @@ def render_markdown(
                 "",
                 "The active-block estimate is the minimum imposed by block, warp, register, and shared-memory limits.",
                 "",
-                "| scheme | kernel | avg us | grid | threads | regs/thread | dynamic smem | blocks/SM | waves |",
-                "|---|---|---:|---:|---:|---:|---:|---:|---:|",
+                "| profile | scheme | kernel | avg us | grid | threads | regs/thread | dynamic smem | blocks/SM | waves |",
+                "|---|---|---|---:|---:|---:|---:|---:|---:|---:|",
             ]
         )
-        for item in sorted(nsys_resources["kernels"], key=lambda value: (value["scheme"], value["name"])):
+        for item in sorted(
+            nsys_resources["kernels"],
+            key=lambda value: (
+                value.get("profile", ""), value["scheme"], value["name"]
+            ),
+        ):
             lines.append(
-                f"| {item['scheme']} | `{item['name']}` | {item['average_us']:.1f} | "
+                f"| {item.get('profile', item['scheme'])} | {item['scheme']} | `{item['name']}` | {item['average_us']:.1f} | "
                 f"{item['grid_x']} | {item['block_threads']} | {item['registers_per_thread']} | "
                 f"{item['dynamic_smem_bytes']} | {item['resource_limited_blocks_per_sm']} | "
                 f"{item['launch_waves']:.2f} |"

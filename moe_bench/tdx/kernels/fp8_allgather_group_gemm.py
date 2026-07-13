@@ -75,6 +75,7 @@ class FP8MoEAllGatherGroupGEMMContext:
     fp8_dtype: torch.dtype  # torch.float8_e4m3fn
     output_dtype: torch.dtype  # typically torch.bfloat16
     BLOCK_K_QUANT: int  # quantization block size, typically 128
+    BLOCK_N_QUANT: int  # weight quantization block size, typically 128
     # parallelism info
     rank: int
     num_ranks: int
@@ -106,6 +107,12 @@ class FP8MoEAllGatherGroupGEMMContext:
         assert self.num_ranks % self.num_local_ranks == 0
         assert self.BLOCK_K == self.BLOCK_K_QUANT
         assert self.K % self.BLOCK_K_QUANT == 0
+        assert self.N_per_rank % self.BLOCK_N_QUANT == 0
+        # A consumer CTA uses one scalar weight scale for its complete N tile.
+        # Splitting a quantization block is valid (for example 128 -> 64), but
+        # a tile may not straddle two independently scaled weight blocks.
+        assert self.BLOCK_N <= self.BLOCK_N_QUANT
+        assert self.BLOCK_N_QUANT % self.BLOCK_N == 0
 
         self.is_multinode = self.num_ranks > self.num_local_ranks
         self.n_nodes = self.num_ranks // self.num_local_ranks
@@ -164,6 +171,7 @@ def create_fp8_ag_group_gemm_context(
     num_ranks,
     num_local_ranks,
     BLOCK_K_QUANT: int = 128,
+    BLOCK_N_QUANT: int = 128,
     ag_intranode_stream: Optional[torch.cuda.Stream] = None,
     ag_internode_stream: Optional[torch.cuda.Stream] = None,
     BLOCK_SIZE_M=128,
@@ -183,6 +191,7 @@ def create_fp8_ag_group_gemm_context(
         fp8_dtype=fp8_dtype,
         output_dtype=output_dtype,
         BLOCK_K_QUANT=BLOCK_K_QUANT,
+        BLOCK_N_QUANT=BLOCK_N_QUANT,
         rank=rank,
         num_ranks=num_ranks,
         num_local_ranks=num_local_ranks,
@@ -432,7 +441,14 @@ def launch_fp8_consumer_group_gemm(
     """Launch the production consumer with precomputed layout and AG readiness."""
     ntokens = a_fp8.shape[0]
     M = ntokens * ctx.topk
-    block_n_quant = ctx.N_per_rank // b_scale.shape[2] if b_scale.dim() == 3 else 128
+    if b_scale.dim() != 3:
+        raise ValueError(f"expected 3D block-quantized weight scale, got shape={tuple(b_scale.shape)}")
+    expected_n_scales = ctx.N_per_rank // ctx.BLOCK_N_QUANT
+    if b_scale.shape[2] != expected_n_scales:
+        raise ValueError(
+            "weight scale N dimension does not match the configured quantization block: "
+            f"got {b_scale.shape[2]}, expected {expected_n_scales}"
+        )
     grid = lambda meta: (
         (triton.cdiv(M, meta["BLOCK_SIZE_M"]) + ctx.num_experts - 1)
         * triton.cdiv(ctx.N_per_rank, meta["BLOCK_SIZE_N"]),
@@ -470,7 +486,7 @@ def launch_fp8_consumer_group_gemm(
         ctx.BLOCK_K,
         ctx.GROUP_SIZE_M,
         ctx.topk,
-        block_n_quant,
+        ctx.BLOCK_N_QUANT,
         WAIT_FOR_AG=wait_for_ag,
         num_stages=ctx.stages,
         num_warps=ctx.warps,
