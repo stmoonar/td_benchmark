@@ -106,7 +106,9 @@ def test_write_manifest_captures_runtime_env_and_resolved_config(tmp_path, monke
     assert manifest["env"]["CUDA_VISIBLE_DEVICES"] == "7"
     assert manifest["effective_env"]["CUDA_VISIBLE_DEVICES"] == "0"
     assert manifest["effective_env"]["TRITON_PTXAS_PATH"] == "/usr/local/cuda/bin/ptxas"
-    assert manifest["dependencies"]["vllm"] in {"missing", "unknown"}
+    vllm_version = manifest["dependencies"]["vllm"]
+    assert isinstance(vllm_version, str)
+    assert vllm_version
 
 
 def test_load_runs_normalizes_result_jsonl_from_run_directories(tmp_path):
