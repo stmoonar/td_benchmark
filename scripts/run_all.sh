@@ -2,9 +2,9 @@
 # One-command remote validation and report-grade benchmark suite.
 #
 # Usage:
-#   VENV_ACTIVATE=/path/to/venv/bin/activate \
-#   TD_PYTHON=/path/to/triton-distributed/python \
 #   bash scripts/run_all.sh
+# The default venv is /data/cinnzhang_vllm_td_test/venvs/vllm-td.
+# Set VENV_ACTIVATE only when running from a different environment.
 # Set GPUS explicitly to bypass automatic idle-GPU selection.
 #
 # The script intentionally unsets CUDA_DEVICE_MAX_CONNECTIONS so CUDA uses its
@@ -15,7 +15,6 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 VENV_ACTIVATE="${VENV_ACTIVATE:-/data/cinnzhang_vllm_td_test/venvs/vllm-td/bin/activate}"
-TD_PYTHON="${TD_PYTHON:-/data/cinnzhang_vllm_td_test/triton_distributed-TD+Flux/python}"
 GPUS="${GPUS:-}"
 NPROC="${NPROC:-4}"
 GPU_IDLE_MAX_MEMORY_MB="${GPU_IDLE_MAX_MEMORY_MB:-1024}"
@@ -40,7 +39,7 @@ else
   exit 2
 fi
 
-export PYTHONPATH="${ROOT}:${TD_PYTHON}:${PYTHONPATH:-}"
+export PYTHONPATH="${ROOT}${PYTHONPATH:+:${PYTHONPATH}}"
 unset CUDA_DEVICE_MAX_CONNECTIONS
 
 if [[ -z "${GPUS}" ]]; then
