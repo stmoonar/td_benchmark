@@ -44,6 +44,7 @@ GPUS=8,10,12,14 bash scripts/run_tp_overlap_investigation.sh
 | b2 chunk sweep | Find the best coarse AG/RS granularity |
 | c4 RS chunk sweep | Detect over-fragmentation from `n_chunks_rs=32` |
 | c4 gate tile sweeps | Test block-M, M-swizzle group, warps, and stages in the fused AG+GEMM kernel |
+| c4 gate joint sweep | Test the resource-coupled block-M/warps/stages/group combinations missed by single-axis sweeps |
 | component benchmark | Measure layout, group128 quantization, and exposed scale AG |
 | torch profiler | Rank kernel time by scheme |
 | Nsight Systems | Inspect actual stream overlap and exposed communication gaps |
@@ -63,11 +64,16 @@ consumer are launched.
 - `*/profiles/torch/*_top_kernels.txt`: top CUDA kernels by total time.
 - `profiles/nsys/*.nsys-rep`: steady-state multi-stream timelines.
 - `profiles/nsys/*_console.log`: profiler launch diagnostics, including NVSHMEM/Triton failures.
+- `analysis/nsys_kernel_resources.json`: launch resources and resource-limited CTA residency derived from Nsight SQLite.
 
 The runner uses a suite-specific Triton cache and temporary directory, and pins
 `NVSHMEM_HOME`, its device bitcode, and its host library to the same Python-wheel
 installation. This prevents stale device modules or a full system `/tmp` from
 invalidating the c4 profile.
+
+After the full sweep has identified the single-axis behavior, use
+`RUN_SWEEPS=joint bash scripts/run_tp_overlap_investigation.sh` to run only the
+resource-coupled c4 gate sweep plus the matched anchors and profiles.
 - `validation_report.json`: fairness and sample-count checks.
 
 Profile runs are separate from end-to-end timing runs. Profiler latency must not

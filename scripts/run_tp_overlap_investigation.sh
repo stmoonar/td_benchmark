@@ -171,8 +171,15 @@ if [[ "${RUN_SWEEPS}" == "1" ]]; then
     --set "schemes.enabled=[c4]" \
     --set "shape.shared_experts=0" \
     --set 'sweep_axes=[{"path":"schemes.c4.tunables.gemm_num_stages","values":[2,3,4]}]'
-else
+elif [[ "${RUN_SWEEPS}" != "joint" ]]; then
   echo "RUN_SWEEPS=${RUN_SWEEPS}; diagnostic sweeps skipped"
+fi
+
+if [[ "${RUN_SWEEPS}" == "1" || "${RUN_SWEEPS}" == "joint" ]]; then
+  run_case "${STAMP}_c4_gate_joint_sweep" "${SWEEP_WARMUP}" "${SWEEP_REPEAT}" \
+    --set "schemes.enabled=[c4]" \
+    --set "shape.shared_experts=0" \
+    --set 'sweep_axes=[{"path":"schemes.c4.tunables.gemm_block_m","values":[64,128]},{"path":"schemes.c4.tunables.gemm_num_warps","values":[4,8]},{"path":"schemes.c4.tunables.gemm_num_stages","values":[2,4]},{"path":"schemes.c4.tunables.gemm_group_size_m","values":[1,8]}]'
 fi
 
 echo "[5/6] Profiles"

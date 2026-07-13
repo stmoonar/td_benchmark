@@ -5,6 +5,7 @@ import json
 from scripts.analyze_tp_overlap import (
     collect_rows,
     collect_torch_critical_paths,
+    resource_limited_blocks_per_sm,
     render_markdown,
     summarize_torch_critical_paths,
     write_csv,
@@ -69,3 +70,23 @@ def test_collects_and_summarizes_torch_critical_path(tmp_path) -> None:
     assert summary["b2"]["total_us"] == 800.0
     assert summary["b2"]["gate_us"] == 350.0
     assert "Torch profile steady critical path" in markdown
+
+
+def test_resource_limited_blocks_matches_blackwell_trace_shapes() -> None:
+    common = {
+        "max_blocks_per_sm": 24,
+        "max_warps_per_sm": 48,
+        "max_registers_per_sm": 65536,
+        "max_smem_per_sm": 102400,
+        "registers_per_thread": 255,
+    }
+
+    c4_blocks = resource_limited_blocks_per_sm(
+        **common, block_threads=256, shared_memory=98304
+    )
+    b2_blocks = resource_limited_blocks_per_sm(
+        **common, block_threads=128, shared_memory=49664
+    )
+
+    assert c4_blocks == 1
+    assert b2_blocks == 2

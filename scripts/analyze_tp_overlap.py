@@ -6,6 +6,8 @@ from __future__ import annotations
 import argparse
 import csv
 import json
+import math
+import sqlite3
 from collections import defaultdict
 from pathlib import Path
 from statistics import median
@@ -14,6 +16,18 @@ from typing import Any
 
 SCHEMES = {"b2", "c4"}
 CRITICAL_PATH_FIELDS = ("total_us", "pre_us", "gate_us", "middle_us", "down_us")
+NSYS_KERNELS = {
+    "b2": {
+        "fused_moe_kernel_accumulate",
+        "fused_moe_kernel",
+        "ncclDevKernel_ReduceScatter_Sum_bf16_RING_LL",
+    },
+    "c4": {
+        "fp8_kernel_consumer_ag_group_gemm",
+        "fp8_moe_gather_rs_grouped_gemm_kernel",
+        "reduce_topk_reduce_scatter_ring_intra_node_kernel",
+    },
+}
 
 
 def collect_rows(suite_dir: Path) -> list[dict[str, Any]]:
@@ -136,10 +150,105 @@ def summarize_torch_critical_paths(records: list[dict[str, Any]]) -> dict[str, d
     return summary
 
 
+def resource_limited_blocks_per_sm(
+    *,
+    max_blocks_per_sm: int,
+    max_warps_per_sm: int,
+    max_registers_per_sm: int,
+    max_smem_per_sm: int,
+    block_threads: int,
+    registers_per_thread: int,
+    shared_memory: int,
+) -> int:
+    limits = [max_blocks_per_sm, max_warps_per_sm // math.ceil(block_threads / 32)]
+    if registers_per_thread:
+        limits.append(max_registers_per_sm // (registers_per_thread * block_threads))
+    if shared_memory:
+        limits.append(max_smem_per_sm // shared_memory)
+    return max(1, min(limits))
+
+
+def collect_nsys_kernel_resources(suite_dir: Path) -> dict[str, Any]:
+    output: dict[str, Any] = {"gpu": {}, "kernels": []}
+    for scheme, kernel_names in NSYS_KERNELS.items():
+        database = suite_dir / "profiles" / "nsys" / f"{scheme}_steady_state.sqlite"
+        if not database.is_file():
+            continue
+        with sqlite3.connect(database) as connection:
+            gpu_row = connection.execute(
+                """
+                SELECT name, smCount, maxRegistersPerSm, maxShmemPerSm,
+                       maxWarpsPerSm, maxBlocksPerSm, computeMajor, computeMinor
+                FROM TARGET_INFO_GPU LIMIT 1
+                """
+            ).fetchone()
+            if gpu_row is None:
+                continue
+            (
+                gpu_name, sm_count, max_registers, max_smem, max_warps,
+                max_blocks, compute_major, compute_minor,
+            ) = gpu_row
+            output["gpu"] = {
+                "name": gpu_name,
+                "sm_count": sm_count,
+                "max_registers_per_sm": max_registers,
+                "max_smem_per_sm": max_smem,
+                "max_warps_per_sm": max_warps,
+                "max_blocks_per_sm": max_blocks,
+                "compute_capability": f"{compute_major}.{compute_minor}",
+            }
+            placeholders = ",".join("?" for _ in kernel_names)
+            query = f"""
+                SELECT strings.value, kernels.registersPerThread, kernels.gridX,
+                       kernels.blockX, kernels.staticSharedMemory,
+                       kernels.dynamicSharedMemory,
+                       AVG(kernels.end - kernels.start) / 1000.0, COUNT(*)
+                FROM CUPTI_ACTIVITY_KIND_KERNEL AS kernels
+                JOIN StringIds AS strings ON strings.id = kernels.shortName
+                WHERE strings.value IN ({placeholders})
+                GROUP BY strings.value, kernels.registersPerThread, kernels.gridX,
+                         kernels.blockX, kernels.staticSharedMemory,
+                         kernels.dynamicSharedMemory
+                ORDER BY strings.value
+            """
+            for row in connection.execute(query, sorted(kernel_names)):
+                (
+                    name, registers, grid_x, block_x, static_smem,
+                    dynamic_smem, average_us, instances,
+                ) = row
+                shared_memory = int(static_smem) + int(dynamic_smem)
+                active_blocks = resource_limited_blocks_per_sm(
+                    max_blocks_per_sm=int(max_blocks),
+                    max_warps_per_sm=int(max_warps),
+                    max_registers_per_sm=int(max_registers),
+                    max_smem_per_sm=int(max_smem),
+                    block_threads=int(block_x),
+                    registers_per_thread=int(registers),
+                    shared_memory=shared_memory,
+                )
+                output["kernels"].append(
+                    {
+                        "scheme": scheme,
+                        "name": name,
+                        "average_us": average_us,
+                        "instances": instances,
+                        "grid_x": grid_x,
+                        "block_threads": block_x,
+                        "registers_per_thread": registers,
+                        "static_smem_bytes": static_smem,
+                        "dynamic_smem_bytes": dynamic_smem,
+                        "resource_limited_blocks_per_sm": active_blocks,
+                        "launch_waves": grid_x / (sm_count * active_blocks),
+                    }
+                )
+    return output
+
+
 def render_markdown(
     records: list[dict[str, Any]],
     components: dict[str, Any] | None = None,
     critical_paths: dict[str, dict[str, float]] | None = None,
+    nsys_resources: dict[str, Any] | None = None,
 ) -> str:
     grouped: dict[tuple[str, int, str], dict[str, dict[str, Any]]] = defaultdict(dict)
     for record in records:
@@ -231,6 +340,31 @@ def render_markdown(
                 f"{(c4['down_us'] - b2['down_us']) / 1000:+.4f} | - |"
             )
 
+    if nsys_resources and nsys_resources.get("kernels"):
+        gpu = nsys_resources.get("gpu", {})
+        lines.extend(
+            [
+                "",
+                "## Nsight launch resources",
+                "",
+                f"GPU: {gpu.get('name', 'unknown')}, CC {gpu.get('compute_capability', 'unknown')}, "
+                f"SMs {gpu.get('sm_count', 'unknown')}, registers/SM {gpu.get('max_registers_per_sm', 'unknown')}, "
+                f"shared-memory/SM {gpu.get('max_smem_per_sm', 'unknown')} bytes.",
+                "",
+                "The active-block estimate is the minimum imposed by block, warp, register, and shared-memory limits.",
+                "",
+                "| scheme | kernel | avg us | grid | threads | regs/thread | dynamic smem | blocks/SM | waves |",
+                "|---|---|---:|---:|---:|---:|---:|---:|---:|",
+            ]
+        )
+        for item in sorted(nsys_resources["kernels"], key=lambda value: (value["scheme"], value["name"])):
+            lines.append(
+                f"| {item['scheme']} | `{item['name']}` | {item['average_us']:.1f} | "
+                f"{item['grid_x']} | {item['block_threads']} | {item['registers_per_thread']} | "
+                f"{item['dynamic_smem_bytes']} | {item['resource_limited_blocks_per_sm']} | "
+                f"{item['launch_waves']:.2f} |"
+            )
+
     lines.extend(
         [
             "",
@@ -258,13 +392,17 @@ def main() -> int:
     components = json.loads(component_path.read_text(encoding="utf-8")) if component_path.is_file() else None
     critical_path_records = collect_torch_critical_paths(suite_dir)
     critical_paths = summarize_torch_critical_paths(critical_path_records)
+    nsys_resources = collect_nsys_kernel_resources(suite_dir)
     write_csv(records, analysis_dir / "comparison.csv")
     (analysis_dir / "torch_critical_path.json").write_text(
         json.dumps({"summary": critical_paths, "iterations": critical_path_records}, indent=2),
         encoding="utf-8",
     )
+    (analysis_dir / "nsys_kernel_resources.json").write_text(
+        json.dumps(nsys_resources, indent=2), encoding="utf-8"
+    )
     (analysis_dir / "comparison.md").write_text(
-        render_markdown(records, components, critical_paths), encoding="utf-8"
+        render_markdown(records, components, critical_paths, nsys_resources), encoding="utf-8"
     )
     print(f"Focused rows: {len(records)}")
     print(f"Analysis: {analysis_dir}")
