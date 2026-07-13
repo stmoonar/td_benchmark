@@ -1,0 +1,23 @@
+{
+  "td_fork": "C:\\Users\\stmoonar\\Desktop\\files\\forks\\Triton-distributed",
+  "td_fork_head": "60bcb68767d21d22bcc4129d7f25446cf954e225",
+  "td_upstream": "C:\\Users\\stmoonar\\Desktop\\files\\forks\\Triton-distributed-upstream",
+  "td_upstream_commit": "1b9dc71a0a58585ac99766d739bf08ec60de4ae7",
+  "files": [
+    {"source": "python/triton_dist/function/nvidia/common.py", "target": "moe_bench/tdx/function/common.py"},
+    {"source": "python/triton_dist/function/nvidia/ep_moe_fused.py", "target": "moe_bench/tdx/function/ep_moe_fused.py"},
+    {"source": "python/triton_dist/jit.py", "target": "moe_bench/tdx/jit.py"},
+    {"source": "python/triton_dist/kernels/common_ops.py", "target": "moe_bench/tdx/kernels/common_ops.py"},
+    {"source": "python/triton_dist/kernels/nvidia/ep_all2all_fused.py", "target": "moe_bench/tdx/kernels/ep_all2all_fused.py"},
+    {"source": "python/triton_dist/kernels/nvidia/fp8_allgather_group_gemm.py", "target": "moe_bench/tdx/kernels/fp8_allgather_group_gemm.py"},
+    {"source": "python/triton_dist/kernels/nvidia/fp8_moe_reduce_rs.py", "target": "moe_bench/tdx/kernels/fp8_moe_reduce_rs.py"},
+    {"source": "python/triton_dist/kernels/nvidia/memory_ops.py", "target": "moe_bench/tdx/kernels/memory_ops.py"},
+    {"source": "python/triton_dist/kernels/nvidia/moe_utils.py", "target": "moe_bench/tdx/kernels/moe_utils.py"},
+    {"source": "python/triton_dist/kernels/nvidia/swiglu_quantize_fp8.py", "target": "moe_bench/tdx/kernels/swiglu_quantize_fp8.py"},
+    {"source": "python/triton_dist/layers/nvidia/ep_a2a_fused_layer.py", "target": "moe_bench/tdx/layers/ep_a2a_fused_layer.py"},
+    {"source": "python/triton_dist/layers/nvidia/ep_moe.py", "target": "moe_bench/tdx/layers/ep_moe.py"},
+    {"source": "python/triton_dist/layers/nvidia/fp8_ep_moe.py", "target": "moe_bench/tdx/layers/fp8_ep_moe.py"},
+    {"source": "python/triton_dist/layers/nvidia/fp8_tp_moe.py", "target": "moe_bench/tdx/layers/fp8_tp_moe.py"},
+    {"source": "python/triton_dist/nv_utils.py", "target": "moe_bench/tdx/nv_utils.py"}
+  ]
+}

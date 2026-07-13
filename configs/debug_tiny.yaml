@@ -1,0 +1,42 @@
+run:
+  tag: debug_tiny
+  seed: 42
+  warmup: 2
+  repeat: 2
+  output_root: results
+shape:
+  M: 32
+  K: 256
+  E: 8
+  top_k: 2
+  n_gateup: 512
+  n_down: 256
+  shared_experts: 0
+routing:
+  imbalance:
+    kind: none
+dist:
+  nproc: 2
+  master_port: 29511
+  cuda_visible_devices: "9,11"
+env:
+  NVSHMEM_SYMMETRIC_SIZE: "4294967296"
+  NVSHMEM_REMOTE_TRANSPORT: none
+  NVSHMEM_DISABLE_CUDA_VMM: "1"
+  CUDA_DEVICE_MAX_CONNECTIONS: "1"
+  C_INCLUDE_PATH: /usr/local/cuda/include
+  TRITON_PTXAS_PATH: /usr/local/cuda/bin/ptxas
+schemes:
+  enabled: [c1]
+  c1:
+    tunables: {}
+verify:
+  enabled: true
+profile:
+  torch_profiler: false
+  intra_kernel: false
+  nvtx: false
+log:
+  level: info
+  diagnostics: true
+sweep_axes: []
