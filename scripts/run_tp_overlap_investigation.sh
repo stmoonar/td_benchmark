@@ -109,7 +109,11 @@ run_case "${STAMP}_paired_v1_no_shared" "${WARMUP}" "${REPEAT}" \
 
 echo "[3/6] Scaling and routing sensitivity"
 echo "RUN component preprocessing and quantization costs"
-CUDA_VISIBLE_DEVICES="${GPUS}" torchrun \
+CUDA_VISIBLE_DEVICES="${GPUS}" \
+NVSHMEM_SYMMETRIC_SIZE="${NVSHMEM_SIZE}" \
+NVSHMEM_REMOTE_TRANSPORT=none \
+NVSHMEM_DISABLE_CUDA_VMM=1 \
+torchrun \
   --nproc_per_node="${NPROC}" \
   --master_port="$((MASTER_PORT + 1))" \
   "${ROOT}/scripts/benchmark_tp_overlap_components.py" \

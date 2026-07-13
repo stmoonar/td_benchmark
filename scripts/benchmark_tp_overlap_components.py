@@ -7,6 +7,7 @@ import argparse
 import json
 import os
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any, Callable
 
 
@@ -27,7 +28,11 @@ def main() -> int:
     from moe_bench.context import finalize_context, init_context
     from moe_bench.timing import bench_cuda
 
-    ctx = init_context()
+    # TD's JIT post-compile hook initializes CUDA modules against NVSHMEM even
+    # for layout helpers that do not themselves communicate. Use the same
+    # NVSHMEM-enabled context as c4 instead of a plain NCCL-only context.
+    td_cfg = SimpleNamespace(schemes=[SimpleNamespace(code="c4")])
+    ctx = init_context(td_cfg)
     try:
         if args.M % ctx.world_size:
             raise ValueError(f"M={args.M} must be divisible by world_size={ctx.world_size}")
