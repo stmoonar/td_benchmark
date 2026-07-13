@@ -1,3 +1,4 @@
+import os
 from pathlib import Path
 
 from moe_bench.cli import build_worker_command, dry_run_lines, env_for_run
@@ -46,3 +47,15 @@ def test_env_for_run_disables_libuv_on_windows_torchrun():
     env = env_for_run(cfg)
 
     assert env["USE_LIBUV"] == "0"
+
+
+def test_env_for_run_uses_environment_packages_without_external_td_path(monkeypatch):
+    monkeypatch.setenv("PYTHONPATH", "/venv-provided-pythonpath")
+    cfg = load_config("configs/smoke.yaml")
+
+    env = env_for_run(cfg)
+
+    python_paths = env["PYTHONPATH"].split(os.pathsep)
+    assert python_paths[0] == str(Path("moe_bench").resolve().parent)
+    assert python_paths[1:] == ["/venv-provided-pythonpath"]
+    assert "triton_distributed-TD+Flux" not in env["PYTHONPATH"]

@@ -40,10 +40,9 @@ def env_for_run(cfg: RunCfg) -> dict[str, str]:
     env["CUDA_VISIBLE_DEVICES"] = cfg.dist.cuda_visible_devices
     env.setdefault("USE_LIBUV", "0")
     new_root = str(Path(__file__).resolve().parent.parent)
-    td_path = "/data/cinnzhang_vllm_td_test/triton_distributed-TD+Flux/python"
     existing = os.environ.get("PYTHONPATH", "")
-    parts = [new_root, td_path] + ([existing] if existing else [])
-    env["PYTHONPATH"] = ":".join(parts)
+    parts = [new_root] + ([existing] if existing else [])
+    env["PYTHONPATH"] = os.pathsep.join(parts)
     return env
 
 
