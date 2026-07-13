@@ -1,0 +1,39 @@
+run:
+  tag: tp_overlap_e2e
+  seed: 42
+  warmup: 20
+  repeat: 50
+  output_root: results
+shape:
+  # Start from the shape where TD-TP-FP8 was observed losing to chunk overlap.
+  preset: v1
+routing:
+  imbalance:
+    kind: none
+dist:
+  nproc: 4
+  master_port: 29500
+  cuda_visible_devices: "8,10,12,14"
+env:
+  NVSHMEM_SYMMETRIC_SIZE: "8589934592"
+  NVSHMEM_REMOTE_TRANSPORT: none
+  NVSHMEM_DISABLE_CUDA_VMM: "1"
+  C_INCLUDE_PATH: /usr/local/cuda/include
+  TRITON_PTXAS_PATH: /usr/local/cuda/bin/ptxas
+schemes:
+  # Strictly matched communication precision: FP8 AG and BF16 RS.
+  enabled: [b2, c4]
+  b2:
+    tunables: {n_chunks_gateup: 2, n_chunks_down: 4}
+  c4:
+    tunables: {n_chunks_rs: 32}
+verify:
+  enabled: true
+profile:
+  torch_profiler: false
+  intra_kernel: false
+  nvtx: true
+log:
+  level: info
+  diagnostics: false
+sweep_axes: []

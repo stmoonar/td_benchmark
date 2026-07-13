@@ -76,6 +76,9 @@ def _run_point(run_dir: Path, point: dict[str, Any], cfg: RunCfg, ctx: DistConte
                         encoding="utf-8",
                     )
 
+            if os.environ.get("MOE_BENCH_NSYS_CAPTURE") == "1":
+                _capture_nsys_range(instance, ctx, code)
+
             verify_result = _reduce_verify_across_ranks(_verify(last_output, data, spec, cfg, ctx), ctx)
 
             if code == "a1":
@@ -102,6 +105,28 @@ def _run_point(run_dir: Path, point: dict[str, Any], cfg: RunCfg, ctx: DistConte
             torch.cuda.empty_cache()
 
     return 0
+
+
+def _capture_nsys_range(instance: SchemeInstance, ctx: DistContext, scheme: str) -> None:
+    """Capture steady-state iterations when launched under nsys cudaProfilerApi mode."""
+    iterations = int(os.environ.get("MOE_BENCH_PROFILE_ITERS", "3"))
+    if iterations <= 0:
+        raise ValueError("MOE_BENCH_PROFILE_ITERS must be positive")
+    if dist.is_initialized():
+        dist.barrier()
+    torch.cuda.cudart().cudaProfilerStart()
+    try:
+        for iteration in range(iterations):
+            torch.cuda.nvtx.range_push(f"PROFILE_{scheme}_ITERATION_{iteration}")
+            try:
+                instance.run()
+            finally:
+                torch.cuda.nvtx.range_pop()
+        torch.cuda.synchronize()
+    finally:
+        torch.cuda.cudart().cudaProfilerStop()
+    if dist.is_initialized():
+        dist.barrier()
 
 
 # 双门阈值：EXP-021 校准值（B1-6）

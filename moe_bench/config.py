@@ -263,7 +263,15 @@ def expand_sweep(cfg: RunCfg) -> list[SweepPoint]:
 
 
 def _build_run_cfg(raw: dict[str, Any]) -> RunCfg:
-    run = raw.get("run", {})
+    run = raw.get("run")
+    if run is None:
+        # resolved_dict() is flat because it is persisted in manifests and
+        # worker payloads. Accept that representation on the round trip.
+        run = {
+            key: raw[key]
+            for key in ("tag", "seed", "warmup", "repeat", "output_root")
+            if key in raw
+        }
     shape = _shape_from_raw(raw.get("shape", {}))
     routing = _routing_from_raw(raw.get("routing", {}))
     schemes = _schemes_from_raw(raw.get("schemes", {}))

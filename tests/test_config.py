@@ -1,7 +1,7 @@
 import pytest
 from pathlib import Path
 
-from moe_bench.config import ConfigError, expand_sweep, load_config
+from moe_bench.config import ConfigError, expand_sweep, load_config, run_cfg_from_dict
 
 REQUIRED_ENV_KEYS = {
     "NVSHMEM_SYMMETRIC_SIZE",
@@ -29,6 +29,20 @@ def test_load_config_applies_defaults_and_overrides():
     assert [scheme.code for scheme in cfg.schemes] == ["a1", "b3"]
     assert cfg.schemes[1].tunables["n_chunks_down"] == 8
     assert cfg.shape.shared_intermediate == cfg.shape.n_down
+
+
+def test_resolved_config_round_trip_preserves_run_settings():
+    cfg = load_config(
+        "configs/smoke.yaml",
+        ["run.tag=roundtrip", "run.warmup=7", "run.repeat=13", "run.output_root=/tmp/focused"],
+    )
+
+    restored = run_cfg_from_dict(cfg.resolved_dict())
+
+    assert restored.tag == "roundtrip"
+    assert restored.warmup == 7
+    assert restored.repeat == 13
+    assert restored.output_root == "/tmp/focused"
 
 
 def test_invalid_shape_reports_field_value_and_constraint():

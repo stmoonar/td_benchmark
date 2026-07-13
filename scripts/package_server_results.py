@@ -65,8 +65,12 @@ def validate_suite(suite_dir: Path) -> dict[str, Any]:
                 errors.append(f"{prefix}: {scheme} uses a non-group128 golden")
             if not row.get("verify", {}).get("pass", False):
                 errors.append(f"{prefix}: {scheme} verification failed")
-            if len(row.get("samples_ms", [])) != repeat:
-                errors.append(f"{prefix}: {scheme} has wrong sample count")
+            actual_samples = len(row.get("samples_ms", []))
+            if actual_samples != repeat:
+                errors.append(
+                    f"{prefix}: {scheme} has wrong sample count "
+                    f"(expected {repeat}, found {actual_samples})"
+                )
 
         duplicates = [key for key, count in key_counts.items() if count != 1]
         if duplicates:
@@ -101,6 +105,11 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Validate rank-0 aggregate benchmark artifacts and create a ZIP")
     parser.add_argument("--suite-dir", required=True, type=Path)
     parser.add_argument("--output", required=True, type=Path)
+    parser.add_argument(
+        "--package-invalid",
+        action="store_true",
+        help="Create the diagnostic ZIP even if validation fails.",
+    )
     args = parser.parse_args()
 
     suite_dir = args.suite_dir.resolve()
@@ -111,10 +120,12 @@ def main() -> int:
         for error in report["errors"]:
             print(f"ERROR: {error}")
         print(f"Validation report: {report_path}")
-        return 1
+        if not args.package_invalid:
+            return 1
+        print("WARNING: packaging invalid suite for diagnosis")
 
     checksum_path, digest = package_suite(suite_dir, args.output.resolve())
-    print(f"Validated runs: {len(report['runs'])}")
+    print(f"Packaged runs: {len(report['runs'])} valid={report['valid']}")
     print(f"ZIP: {args.output.resolve()}")
     print(f"SHA256: {digest}")
     print(f"Checksum file: {checksum_path}")
