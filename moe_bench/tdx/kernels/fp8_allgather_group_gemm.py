@@ -238,6 +238,7 @@ def fp8_kernel_consumer_ag_group_gemm(
     GROUP_SIZE_M: tl.constexpr,
     TOP_K: tl.constexpr,
     BLOCK_N_QUANT: tl.constexpr,
+    WAIT_FOR_AG: tl.constexpr,
 ):
     """FP8 consumer GEMM kernel with tile-level AG overlap.
 
@@ -273,9 +274,12 @@ def fp8_kernel_consumer_ag_group_gemm(
     b_ptrs = (b_ptr + offs_be * stride_be + offs_k[:, None] * stride_bk + offs_bn[None, :] * stride_bn)
 
     # ─── Wait for AG data to be ready (tile-level overlap) ───
-    token = dl.wait(block_barrier_ptr + segment_start, segment_end - segment_start + 1, "gpu", "acquire")
+    if WAIT_FOR_AG:
+        token = dl.wait(block_barrier_ptr + segment_start, segment_end - segment_start + 1, "gpu", "acquire")
+        a_ptrs = dl.consume_token(a_ptrs, token)
+    # Keep the same CTA synchronization in the ready/no-wait diagnostic so the
+    # measured delta isolates the wait token and its memory dependency.
     __syncthreads()
-    a_ptrs = dl.consume_token(a_ptrs, token)
 
     accumulator = tl.zeros((BLOCK_SIZE_M, BLOCK_SIZE_N), dtype=tl.float32)
 
@@ -409,6 +413,70 @@ def fp8_grouped_gemm_kernel(
 # Entry Point: Tile-level overlap version
 # =============================================================================
 
+def launch_fp8_consumer_group_gemm(
+    a_fp8: torch.Tensor,
+    a_scale: torch.Tensor,
+    b_fp8: torch.Tensor,
+    b_scale: torch.Tensor,
+    output: torch.Tensor,
+    ctx: FP8MoEAllGatherGroupGEMMContext,
+    sorted_gather_index: torch.Tensor,
+    expert_idx: torch.Tensor,
+    tiled_m: torch.Tensor,
+    segment_start: torch.Tensor,
+    segment_end: torch.Tensor,
+    ntiles_gpu: torch.Tensor,
+    *,
+    wait_for_ag: bool,
+) -> torch.Tensor:
+    """Launch the production consumer with precomputed layout and AG readiness."""
+    ntokens = a_fp8.shape[0]
+    M = ntokens * ctx.topk
+    block_n_quant = ctx.N_per_rank // b_scale.shape[2] if b_scale.dim() == 3 else 128
+    grid = lambda meta: (
+        (triton.cdiv(M, meta["BLOCK_SIZE_M"]) + ctx.num_experts - 1)
+        * triton.cdiv(ctx.N_per_rank, meta["BLOCK_SIZE_N"]),
+    )
+    fp8_kernel_consumer_ag_group_gemm[grid](
+        a_fp8,
+        a_scale,
+        b_fp8,
+        b_scale,
+        output,
+        ctx.symm_barrier,
+        sorted_gather_index,
+        expert_idx,
+        tiled_m,
+        segment_start,
+        segment_end,
+        ntiles_gpu,
+        M,
+        ctx.N_per_rank,
+        ctx.K,
+        a_fp8.stride(0),
+        a_fp8.stride(1),
+        a_scale.stride(0),
+        a_scale.stride(1),
+        b_fp8.stride(0),
+        b_fp8.stride(1),
+        b_fp8.stride(2),
+        b_scale.stride(0),
+        b_scale.stride(1),
+        b_scale.stride(2),
+        output.stride(0),
+        output.stride(1),
+        ctx.BLOCK_M,
+        ctx.BLOCK_N,
+        ctx.BLOCK_K,
+        ctx.GROUP_SIZE_M,
+        ctx.topk,
+        block_n_quant,
+        WAIT_FOR_AG=wait_for_ag,
+        num_stages=ctx.stages,
+        num_warps=ctx.warps,
+    )
+    return output
+
 def fp8_ag_group_gemm(
     a_fp8: torch.Tensor,
     a_scale: torch.Tensor,
@@ -500,47 +568,20 @@ def fp8_ag_group_gemm(
     #   - Scale AG completes on ag_intranode_stream BEFORE FP8 AG producer starts
     #   - Consumer only reads scale AFTER dl.wait confirms FP8 data arrived
     #   - FP8 data can only arrive after FP8 AG producer runs (which is after scale AG)
-    BLOCK_N_QUANT = ctx.N_per_rank // b_scale.shape[2] if b_scale.dim() == 3 else 128
-
-    grid = lambda META: ((triton.cdiv(M, META["BLOCK_SIZE_M"]) + ctx.num_experts - 1) * triton.cdiv(
-        ctx.N_per_rank, META["BLOCK_SIZE_N"]), )
-
-    fp8_kernel_consumer_ag_group_gemm[grid](
+    launch_fp8_consumer_group_gemm(
         local_ag_buffer,
         ag_scale,
         b_fp8,
         b_scale,
         c,
-        ctx.symm_barrier,
+        ctx,
         sorted_gather_index,
         expert_idx,
         tiled_m,
         segment_start,
         segment_end,
         ntiles_gpu,
-        M,
-        ctx.N_per_rank,
-        ctx.K,
-        local_ag_buffer.stride(0),
-        local_ag_buffer.stride(1),
-        ag_scale.stride(0),
-        ag_scale.stride(1),
-        b_fp8.stride(0),
-        b_fp8.stride(1),
-        b_fp8.stride(2),
-        b_scale.stride(0),
-        b_scale.stride(1),
-        b_scale.stride(2),
-        c.stride(0),
-        c.stride(1),
-        ctx.BLOCK_M,
-        ctx.BLOCK_N,
-        ctx.BLOCK_K,
-        ctx.GROUP_SIZE_M,
-        ctx.topk,
-        BLOCK_N_QUANT,
-        num_stages=ctx.stages,
-        num_warps=ctx.warps,
+        wait_for_ag=True,
     )
 
     # Wait for AG streams to complete

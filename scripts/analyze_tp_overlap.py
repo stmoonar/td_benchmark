@@ -309,6 +309,18 @@ def render_markdown(
         for name, measurement in components.get("measurements", {}).items():
             latency = measurement["lat_ms"]
             lines.append(f"| {name} | {latency['med']:.6f} | {latency['p95']:.6f} |")
+        wait_comparison = components.get("consumer_wait_comparison")
+        if wait_comparison:
+            lines.extend(
+                [
+                    "",
+                    "Ready/no-wait output parity: "
+                    f"max_abs={wait_comparison['max_abs']:.6g}. "
+                    f"Removing `dl.wait` changes the median by "
+                    f"{wait_comparison['wait_cost_ms']:+.6f} ms "
+                    f"({wait_comparison['wait_cost_percent_of_ready']:+.2f}% of ready-wait latency).",
+                ]
+            )
 
     if critical_paths:
         lines.extend(

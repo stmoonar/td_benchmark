@@ -90,3 +90,19 @@ def test_resource_limited_blocks_matches_blackwell_trace_shapes() -> None:
 
     assert c4_blocks == 1
     assert b2_blocks == 2
+
+
+def test_render_includes_ready_no_wait_comparison() -> None:
+    components = {
+        "measurements": {},
+        "consumer_wait_comparison": {
+            "max_abs": 0.0,
+            "wait_cost_ms": 0.0125,
+            "wait_cost_percent_of_ready": 0.5,
+        },
+    }
+
+    markdown = render_markdown([], components=components)
+
+    assert "Ready/no-wait output parity" in markdown
+    assert "+0.012500 ms" in markdown

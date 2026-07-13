@@ -31,9 +31,9 @@ schemes:
       gemm_block_m: 128
       gemm_block_n: 128
       gemm_block_k: 128
-      gemm_group_size_m: 8
+      gemm_group_size_m: 1
       gemm_num_warps: 8
-      gemm_num_stages: 4
+      gemm_num_stages: 2
 verify:
   enabled: true
 profile:

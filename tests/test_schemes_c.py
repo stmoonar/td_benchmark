@@ -67,3 +67,24 @@ def test_c3_source_uses_explicit_group128_activation_quantization():
     assert "_quantize_fp8_rowwise" not in td_common
     assert "_quantize_fp8_rowwise" not in fp8_ep
     assert "_quantize_fp8_blockwise(bundle.hidden_local, block_k=128)" in td_common
+
+
+def test_investigation_config_uses_best_joint_gate_configuration():
+    from moe_bench.config import load_config
+
+    cfg = load_config("configs/investigate_tp_overlap.yaml")
+    c4 = next(scheme for scheme in cfg.schemes if scheme.code == "c4")
+
+    assert c4.tunables["gemm_block_m"] == 128
+    assert c4.tunables["gemm_group_size_m"] == 1
+    assert c4.tunables["gemm_num_warps"] == 8
+    assert c4.tunables["gemm_num_stages"] == 2
+
+
+def test_production_consumer_keeps_wait_enabled():
+    source = Path("moe_bench/tdx/kernels/fp8_allgather_group_gemm.py").read_text(
+        encoding="utf-8"
+    )
+
+    assert "WAIT_FOR_AG=wait_for_ag" in source
+    assert "wait_for_ag=True" in source

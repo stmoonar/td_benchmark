@@ -45,6 +45,7 @@ GPUS=8,10,12,14 bash scripts/run_tp_overlap_investigation.sh
 | c4 RS chunk sweep | Detect over-fragmentation from `n_chunks_rs=32` |
 | c4 gate tile sweeps | Test block-M, M-swizzle group, warps, and stages in the fused AG+GEMM kernel |
 | c4 gate joint sweep | Test the resource-coupled block-M/warps/stages/group combinations missed by single-axis sweeps |
+| c4 ready/no-wait consumer | Hold FP8 data and barriers ready, then isolate the `dl.wait` token cost |
 | component benchmark | Measure layout, group128 quantization, and exposed scale AG |
 | torch profiler | Rank kernel time by scheme |
 | Nsight Systems | Inspect actual stream overlap and exposed communication gaps |
@@ -65,6 +66,7 @@ consumer are launched.
 - `profiles/nsys/*.nsys-rep`: steady-state multi-stream timelines.
 - `profiles/nsys/*_console.log`: profiler launch diagnostics, including NVSHMEM/Triton failures.
 - `analysis/nsys_kernel_resources.json`: launch resources and resource-limited CTA residency derived from Nsight SQLite.
+- `analysis/component_benchmarks.json`: includes identical ready/no-wait consumer timings and their output parity check.
 
 The runner uses a suite-specific Triton cache and temporary directory, and pins
 `NVSHMEM_HOME`, its device bitcode, and its host library to the same Python-wheel
