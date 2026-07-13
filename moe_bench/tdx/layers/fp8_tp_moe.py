@@ -211,13 +211,21 @@ class FP8_TP_MoE:
     """
 
     def __init__(self, rank=0, world_size=8, group=None,
-                 fp8_dtype=torch.float8_e4m3fn, block_k_quant=128, block_n_quant=128):
+                 fp8_dtype=torch.float8_e4m3fn, block_k_quant=128, block_n_quant=128,
+                 gemm_block_m=128, gemm_block_n=128, gemm_block_k=128,
+                 gemm_group_size_m=8, gemm_num_warps=8, gemm_num_stages=4):
         self.rank = rank
         self.world_size = world_size
         self.group = group
         self.fp8_dtype = fp8_dtype
         self.block_k_quant = block_k_quant
         self.block_n_quant = block_n_quant
+        self.gemm_block_m = gemm_block_m
+        self.gemm_block_n = gemm_block_n
+        self.gemm_block_k = gemm_block_k
+        self.gemm_group_size_m = gemm_group_size_m
+        self.gemm_num_warps = gemm_num_warps
+        self.gemm_num_stages = gemm_num_stages
 
         # Weights (FP8 quantized)
         self.gate_up_proj_fp8 = None  # [E, K, N_gateup_per_tp] in FP8
@@ -287,12 +295,12 @@ class FP8_TP_MoE:
             num_ranks=self.world_size,
             num_local_ranks=self.world_size,
             BLOCK_K_QUANT=self.block_k_quant,
-            BLOCK_SIZE_M=128,
-            BLOCK_SIZE_N=128,
-            BLOCK_SIZE_K=128,
-            GROUP_SIZE_M=8,
-            stages=4,
-            num_warps=8,
+            BLOCK_SIZE_M=self.gemm_block_m,
+            BLOCK_SIZE_N=self.gemm_block_n,
+            BLOCK_SIZE_K=self.gemm_block_k,
+            GROUP_SIZE_M=self.gemm_group_size_m,
+            stages=self.gemm_num_stages,
+            num_warps=self.gemm_num_warps,
         )
 
         self.rs_ctx = create_moe_rs_context(
@@ -473,12 +481,12 @@ class FP8_TP_MoE_FP8RS(FP8_TP_MoE):
             num_ranks=self.world_size,
             num_local_ranks=self.world_size,
             BLOCK_K_QUANT=self.block_k_quant,
-            BLOCK_SIZE_M=128,
-            BLOCK_SIZE_N=128,
-            BLOCK_SIZE_K=128,
-            GROUP_SIZE_M=8,
-            stages=4,
-            num_warps=8,
+            BLOCK_SIZE_M=self.gemm_block_m,
+            BLOCK_SIZE_N=self.gemm_block_n,
+            BLOCK_SIZE_K=self.gemm_block_k,
+            GROUP_SIZE_M=self.gemm_group_size_m,
+            stages=self.gemm_num_stages,
+            num_warps=self.gemm_num_warps,
         )
 
         # BF16 RS context (for GEMM signaling infrastructure)

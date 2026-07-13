@@ -31,8 +31,17 @@ source "${VENV_ACTIVATE}"
 
 export PYTHONPATH="${ROOT}${PYTHONPATH:+:${PYTHONPATH}}"
 unset CUDA_DEVICE_MAX_CONNECTIONS
+NVSHMEM_HOME_RESOLVED="${NVSHMEM_HOME:-$(python -c 'import nvidia.nvshmem; print(next(iter(nvidia.nvshmem.__path__)))')}"
+TRITON_CACHE_DIR="${TRITON_CACHE_DIR:-${ROOT}/results/.triton_cache_${STAMP}}"
+PROFILE_TMPDIR="${PROFILE_TMPDIR:-${ROOT}/results/.profile_tmp_${STAMP}}"
+export NVSHMEM_HOME="${NVSHMEM_HOME_RESOLVED}"
+export NVSHMEM_LIBDEVICE_PATH="${NVSHMEM_HOME_RESOLVED}/lib"
+export LD_LIBRARY_PATH="${NVSHMEM_HOME_RESOLVED}/lib${LD_LIBRARY_PATH:+:${LD_LIBRARY_PATH}}"
+export TRITON_CACHE_DIR PROFILE_TMPDIR
+export TMPDIR="${PROFILE_TMPDIR}"
 mkdir -p "${SUITE_DIR}/suite_logs" "${SUITE_DIR}/environment" \
-  "${SUITE_DIR}/profiles/nsys" "${SUITE_DIR}/analysis"
+  "${SUITE_DIR}/profiles/nsys" "${SUITE_DIR}/analysis" \
+  "${TRITON_CACHE_DIR}" "${PROFILE_TMPDIR}"
 exec > >(tee -a "${SUITE_DIR}/suite_logs/run_investigation.log") 2>&1
 
 if [[ -z "${GPUS}" ]]; then
@@ -54,6 +63,8 @@ echo "zip_path=${ZIP_PATH}"
 echo "branch=$(git -C "${ROOT}" branch --show-current)"
 echo "gpus=${GPUS} selection=${GPU_SELECTION} nproc=${NPROC}"
 echo "comparison=b2_vs_c4 CUDA_DEVICE_MAX_CONNECTIONS=${CUDA_DEVICE_MAX_CONNECTIONS-unset}"
+echo "nvshmem_home=${NVSHMEM_HOME}"
+echo "triton_cache_dir=${TRITON_CACHE_DIR} tmpdir=${TMPDIR}"
 
 {
   date --iso-8601=seconds
@@ -64,6 +75,10 @@ echo "comparison=b2_vs_c4 CUDA_DEVICE_MAX_CONNECTIONS=${CUDA_DEVICE_MAX_CONNECTI
   git -C "${ROOT}" status --short
   echo "selected_gpus=${GPUS}"
   echo "CUDA_DEVICE_MAX_CONNECTIONS=${CUDA_DEVICE_MAX_CONNECTIONS-unset}"
+  echo "NVSHMEM_HOME=${NVSHMEM_HOME}"
+  echo "NVSHMEM_LIBDEVICE_PATH=${NVSHMEM_LIBDEVICE_PATH}"
+  echo "TRITON_CACHE_DIR=${TRITON_CACHE_DIR}"
+  echo "TMPDIR=${TMPDIR}"
   command -v nsys >/dev/null 2>&1 && nsys --version || echo "nsys=missing"
 } > "${SUITE_DIR}/environment/runtime.txt"
 nvidia-smi -q > "${SUITE_DIR}/environment/nvidia_smi_q.txt"
@@ -140,6 +155,22 @@ if [[ "${RUN_SWEEPS}" == "1" ]]; then
     --set "schemes.enabled=[c4]" \
     --set "shape.shared_experts=0" \
     --set 'sweep_axes=[{"path":"schemes.c4.tunables.n_chunks_rs","values":[4,8,16,32]}]'
+  run_case "${STAMP}_c4_gate_block_m_sweep" "${SWEEP_WARMUP}" "${SWEEP_REPEAT}" \
+    --set "schemes.enabled=[c4]" \
+    --set "shape.shared_experts=0" \
+    --set 'sweep_axes=[{"path":"schemes.c4.tunables.gemm_block_m","values":[64,128]}]'
+  run_case "${STAMP}_c4_gate_group_m_sweep" "${SWEEP_WARMUP}" "${SWEEP_REPEAT}" \
+    --set "schemes.enabled=[c4]" \
+    --set "shape.shared_experts=0" \
+    --set 'sweep_axes=[{"path":"schemes.c4.tunables.gemm_group_size_m","values":[1,4,8]}]'
+  run_case "${STAMP}_c4_gate_warps_sweep" "${SWEEP_WARMUP}" "${SWEEP_REPEAT}" \
+    --set "schemes.enabled=[c4]" \
+    --set "shape.shared_experts=0" \
+    --set 'sweep_axes=[{"path":"schemes.c4.tunables.gemm_num_warps","values":[4,8]}]'
+  run_case "${STAMP}_c4_gate_stages_sweep" "${SWEEP_WARMUP}" "${SWEEP_REPEAT}" \
+    --set "schemes.enabled=[c4]" \
+    --set "shape.shared_experts=0" \
+    --set 'sweep_axes=[{"path":"schemes.c4.tunables.gemm_num_stages","values":[2,3,4]}]'
 else
   echo "RUN_SWEEPS=${RUN_SWEEPS}; diagnostic sweeps skipped"
 fi
@@ -180,7 +211,8 @@ run_nsys_case() {
       --set "schemes.enabled=[${scheme}]" \
       --set "shape.shared_experts=0" \
       --set "env.MOE_BENCH_NSYS_CAPTURE=1" \
-      --set "env.MOE_BENCH_PROFILE_ITERS=${PROFILE_ITERS}"; then
+      --set "env.MOE_BENCH_PROFILE_ITERS=${PROFILE_ITERS}" \
+      2>&1 | tee "${output}_console.log"; then
     echo "WARNING: nsys capture failed for ${scheme}"
     echo "nsys capture failed" > "${output}_FAILED.txt"
     return 0
@@ -202,8 +234,8 @@ run_nsys_case() {
 
 if [[ "${RUN_NSYS}" == "1" ]]; then
   if command -v nsys >/dev/null 2>&1; then
-    run_nsys_case b2
     run_nsys_case c4
+    run_nsys_case b2
   else
     echo "WARNING: nsys is unavailable; torch profiles are still included"
     echo "nsys command not found" > "${SUITE_DIR}/profiles/nsys/MISSING.txt"

@@ -47,6 +47,19 @@ def test_fp8_quantization_block_sizes_cannot_be_overridden():
         validate_tunables(spec, {"block_k_quant": 64})
 
 
+def test_c4_gate_gemm_tunables_match_the_existing_kernel_defaults():
+    spec, _ = REGISTRY["c4"]
+
+    values = validate_tunables(spec, {})
+
+    assert values["gemm_block_m"] == 128
+    assert values["gemm_block_n"] == 128
+    assert values["gemm_block_k"] == 128
+    assert values["gemm_group_size_m"] == 8
+    assert values["gemm_num_warps"] == 8
+    assert values["gemm_num_stages"] == 4
+
+
 def test_c3_source_uses_explicit_group128_activation_quantization():
     td_common = Path("moe_bench/schemes/td_common.py").read_text(encoding="utf-8")
     fp8_ep = Path("moe_bench/tdx/layers/fp8_ep_moe.py").read_text(encoding="utf-8")

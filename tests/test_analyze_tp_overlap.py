@@ -2,7 +2,13 @@ from __future__ import annotations
 
 import json
 
-from scripts.analyze_tp_overlap import collect_rows, render_markdown, write_csv
+from scripts.analyze_tp_overlap import (
+    collect_rows,
+    collect_torch_critical_paths,
+    render_markdown,
+    summarize_torch_critical_paths,
+    write_csv,
+)
 
 
 def _row(scheme: str, median: float) -> dict:
@@ -35,3 +41,31 @@ def test_collect_and_render_paired_comparison(tmp_path) -> None:
     assert "1.500x" in markdown
     assert "a1" not in markdown
     assert "median_ms" in csv_path.read_text(encoding="utf-8")
+
+
+def test_collects_and_summarizes_torch_critical_path(tmp_path) -> None:
+    trace_dir = tmp_path / "run" / "profiles" / "torch"
+    trace_dir.mkdir(parents=True)
+    events = []
+    for offset in (0.0, 1000.0):
+        events.extend(
+            [
+                {"cat": "kernel", "name": "moe_align_block_size_kernel", "ts": offset, "dur": 10.0},
+                {"cat": "kernel", "name": "ncclDevKernel_AllGather", "ts": offset + 100.0, "dur": 100.0},
+                {"cat": "kernel", "name": "fused_moe_kernel_accumulate", "ts": offset + 150.0, "dur": 300.0},
+                {"cat": "kernel", "name": "fused_moe_kernel", "ts": offset + 500.0, "dur": 200.0},
+                {"cat": "kernel", "name": "ncclDevKernel_ReduceScatter", "ts": offset + 600.0, "dur": 200.0},
+            ]
+        )
+    (trace_dir / "b2_rank0.json").write_text(
+        json.dumps({"traceEvents": events}), encoding="utf-8"
+    )
+
+    rows = collect_torch_critical_paths(tmp_path)
+    summary = summarize_torch_critical_paths(rows)
+    markdown = render_markdown([], critical_paths=summary)
+
+    assert len(rows) == 2
+    assert summary["b2"]["total_us"] == 800.0
+    assert summary["b2"]["gate_us"] == 350.0
+    assert "Torch profile steady critical path" in markdown

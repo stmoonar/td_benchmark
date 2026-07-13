@@ -26,7 +26,14 @@ schemes:
   b2:
     tunables: {n_chunks_gateup: 2, n_chunks_down: 4}
   c4:
-    tunables: {n_chunks_rs: 32}
+    tunables:
+      n_chunks_rs: 32
+      gemm_block_m: 128
+      gemm_block_n: 128
+      gemm_block_k: 128
+      gemm_group_size_m: 8
+      gemm_num_warps: 8
+      gemm_num_stages: 4
 verify:
   enabled: true
 profile:

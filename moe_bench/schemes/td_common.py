@@ -50,7 +50,7 @@ FP8_TP_TUNABLES = {
     "gemm_block_m": TunableSpec(int, 128, "FP8 GEMM block M"),
     "gemm_block_n": TunableSpec(int, 128, "FP8 GEMM block N"),
     "gemm_block_k": TunableSpec(int, 128, "FP8 GEMM block K"),
-    "gemm_group_size_m": TunableSpec(int, 1, "FP8 grouped GEMM M swizzle group"),
+    "gemm_group_size_m": TunableSpec(int, 8, "FP8 grouped GEMM M swizzle group"),
     "gemm_num_warps": TunableSpec(int, 8, "FP8 GEMM launch warps"),
     "gemm_num_stages": TunableSpec(int, 4, "FP8 GEMM launch stages"),
 }
@@ -216,6 +216,12 @@ def _build_tp(module: Any, spec: SchemeSpec, cfg: Any, ctx: Any, bundle: Any, we
         group=ctx.group,
         block_k_quant=128,
         block_n_quant=128,
+        gemm_block_m=tunables["gemm_block_m"],
+        gemm_block_n=tunables["gemm_block_n"],
+        gemm_block_k=tunables["gemm_block_k"],
+        gemm_group_size_m=tunables["gemm_group_size_m"],
+        gemm_num_warps=tunables["gemm_num_warps"],
+        gemm_num_stages=tunables["gemm_num_stages"],
     )
     layer._init_parameters_from_bf16(
         gate_up_proj_bf16=weights["w1_bf16"].transpose(1, 2).contiguous(),
