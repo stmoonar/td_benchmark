@@ -7,8 +7,15 @@ from moe_bench.context import DistContext
 from moe_bench.data.bundle import build_data_bundle
 
 
+def _tiny_cfg():
+    return replace_cfg(
+        load_config("configs/smoke.yaml"),
+        shape=ShapeCfg(M=8, K=8, E=4, top_k=2, n_gateup=8, n_down=4, shared_experts=1),
+    )
+
+
 def test_build_data_bundle_assembles_rank_local_inputs_and_golden_outputs():
-    cfg = load_config("configs/smoke.yaml")
+    cfg = _tiny_cfg()
     ctx = DistContext(rank=0, world_size=1, local_rank=0, device="cpu")
 
     bundle = build_data_bundle(cfg, ctx, device="cpu")
@@ -19,13 +26,11 @@ def test_build_data_bundle_assembles_rank_local_inputs_and_golden_outputs():
     assert bundle.ckpt.w2.fp8.shape == (cfg.shape.E, cfg.shape.K, cfg.shape.n_down)
     assert bundle.routing.topk_ids_local.shape == (cfg.shape.M, cfg.shape.top_k)
     assert bundle.routing.topk_weights_local.shape == (cfg.shape.M, cfg.shape.top_k)
-    assert bundle.golden.bf16.shape == (cfg.shape.M, cfg.shape.K)
     assert bundle.golden.fp8sim_group128.shape == (cfg.shape.M, cfg.shape.K)
-    assert bundle.golden.fp8sim_rowwise.shape == (cfg.shape.M, cfg.shape.K)
 
 
 def test_build_data_bundle_is_deterministic_for_same_config_and_rank():
-    cfg = load_config("configs/smoke.yaml")
+    cfg = _tiny_cfg()
     ctx = DistContext(rank=0, world_size=1, local_rank=0, device="cpu")
 
     first = build_data_bundle(cfg, ctx, device="cpu")
@@ -33,7 +38,7 @@ def test_build_data_bundle_is_deterministic_for_same_config_and_rank():
 
     assert torch.equal(first.hidden_local, second.hidden_local)
     assert torch.equal(first.routing.topk_ids_local, second.routing.topk_ids_local)
-    assert torch.equal(first.golden.bf16, second.golden.bf16)
+    assert torch.equal(first.golden.fp8sim_group128, second.golden.fp8sim_group128)
 
 
 def test_build_data_bundle_aligns_m_and_slices_by_rank():

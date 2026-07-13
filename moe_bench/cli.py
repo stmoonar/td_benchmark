@@ -5,6 +5,7 @@ import json
 import os
 import shutil
 import subprocess
+import sys
 from datetime import datetime
 from pathlib import Path
 from typing import Sequence
@@ -14,6 +15,9 @@ import yaml
 from .config import RunCfg, SweepPoint, expand_sweep, load_config, run_cfg_from_dict
 from .results import generate_summary, read_results, write_manifest
 from . import worker
+
+
+_UNSET_FOR_RUN = {"CUDA_DEVICE_MAX_CONNECTIONS"}
 
 
 def build_worker_command(cfg: RunCfg, point: SweepPoint, run_dir: str | Path) -> list[str]:
@@ -46,6 +50,7 @@ def env_for_run(cfg: RunCfg) -> dict[str, str]:
 def dry_run_lines(cfg: RunCfg, run_dir: str | Path | None = None) -> list[str]:
     target_dir = Path(run_dir) if run_dir is not None else make_run_dir(cfg, create=False)
     lines = [f"run_dir={target_dir}"]
+    lines.append("unset: " + ",".join(sorted(_UNSET_FOR_RUN)))
     env = env_for_run(cfg)
     lines.append("env:")
     for key in sorted(env):
@@ -90,8 +95,17 @@ def main(argv: Sequence[str] | None = None) -> int:
     write_resolved_config(cfg, run_dir)
     points = expand_sweep(cfg)
     run_env = env_for_run(cfg)
-    write_manifest(run_dir, cfg, points, argv=list(argv) if argv is not None else None, effective_env=run_env)
+    write_manifest(
+        run_dir,
+        cfg,
+        points,
+        argv=list(argv) if argv is not None else list(sys.argv[1:]),
+        effective_env=run_env,
+        unset_env=_UNSET_FOR_RUN,
+    )
     child_env = os.environ.copy()
+    for key in _UNSET_FOR_RUN:
+        child_env.pop(key, None)
     child_env.update(run_env)
     exit_code = 0
 

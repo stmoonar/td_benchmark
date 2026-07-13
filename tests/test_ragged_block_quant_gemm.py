@@ -1,3 +1,5 @@
+import os
+
 import pytest
 
 from moe_bench.data.ragged import plan_ragged_block_quant_gemm_repro
@@ -18,7 +20,10 @@ def test_ragged_repro_scaffold_covers_und_gen_k192_case_on_cpu():
     ]
 
 
-@pytest.mark.skipif(not torch.cuda.is_available(), reason="SERVER-VERIFY: requires CUDA, vLLM fused_moe, and tdx FP8 GEMM on the GPU server")
+@pytest.mark.skipif(
+    os.environ.get("MOE_BENCH_RUN_SERVER_REPRO") != "1",
+    reason="manual destructive/server repro; excluded from the automated correctness suite",
+)
 def test_ragged_block_quant_gemm_server_repro():
     pytest.importorskip("vllm")
     pytest.importorskip("triton_dist")

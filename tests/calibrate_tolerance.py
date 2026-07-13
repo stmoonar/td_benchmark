@@ -27,7 +27,7 @@ def calibrate(shape: ShapeCfg, seed: int, act_quant: str) -> dict[str, float]:
 
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--act-quant", choices=["group128", "rowwise"], default="group128")
+    parser.add_argument("--act-quant", choices=["group128"], default="group128")
     args = parser.parse_args()
     shape = ShapeCfg(M=256, K=64, E=8, top_k=2, n_gateup=32, n_down=16, shared_experts=1)
     print(json.dumps(calibrate(shape, seed=42, act_quant=args.act_quant), indent=2))

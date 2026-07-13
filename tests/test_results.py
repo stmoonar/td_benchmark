@@ -72,6 +72,25 @@ def test_generate_summary_includes_shape_matrix_and_verify_rollup(tmp_path):
     assert "| SERVER-VERIFY | 1 |" in summary
 
 
+def test_generate_summary_does_not_mix_baselines_across_routing_points(tmp_path):
+    a1_none = _row("a1", 2.0)
+    b1_none = _row("b1", 1.0)
+    a1_zipf = _row("a1", 4.0)
+    b1_zipf = _row("b1", 2.0)
+    for row in [a1_none, b1_none]:
+        row["point_index"] = 0
+        row["routing"]["kind"] = "none"
+    for row in [a1_zipf, b1_zipf]:
+        row["point_index"] = 1
+        row["routing"]["kind"] = "zipf"
+
+    summary = generate_summary([a1_none, b1_none, a1_zipf, b1_zipf], tmp_path / "summary.md")
+
+    assert summary.count("| b1 | 1.000 | 2.00x | PASS |") == 2
+    assert summary.count("| b1 | 2.000 | 2.00x | PASS |") == 2
+    assert "| b1 | 1.000 | 4.00x | PASS |" not in summary
+
+
 def test_write_manifest_captures_runtime_env_and_resolved_config(tmp_path, monkeypatch):
     monkeypatch.setenv("CUDA_VISIBLE_DEVICES", "7")
     cfg = load_config("configs/smoke.yaml", ["run.tag=manifest"])

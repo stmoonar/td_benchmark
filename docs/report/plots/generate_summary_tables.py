@@ -32,7 +32,7 @@ def _write_latency_table(frame, path: Path) -> None:
     rows = []
     for _, row in frame.sort_values(["shape.M", "scheme"]).iterrows():
         median = _median_ms(row)
-        baseline = _baseline_for_m(frame, int(row["shape.M"]))
+        baseline = _baseline_for_row(frame, row)
         speedup = baseline / median if baseline and median else None
         rows.append(
             {
@@ -62,8 +62,14 @@ def _median_ms(row) -> float:
     raise ValueError("result row is missing lat_ms.med, lat_ms.median, and lat_ms.avg")
 
 
-def _baseline_for_m(frame, m_value: int) -> float | None:
-    candidates = frame[(frame["scheme"] == "a1") & (frame["shape.M"] == m_value)]
+def _baseline_for_row(frame, row) -> float | None:
+    candidates = frame[frame["scheme"] == "a1"]
+    if "point_index" in frame.columns and "point_index" in row:
+        candidates = candidates[candidates["point_index"] == row["point_index"]]
+    else:
+        candidates = candidates[candidates["shape.M"] == int(row["shape.M"])]
+        if "routing.kind" in frame.columns and "routing.kind" in row:
+            candidates = candidates[candidates["routing.kind"] == row["routing.kind"]]
     if candidates.empty:
         return None
     return _median_ms(candidates.iloc[0])

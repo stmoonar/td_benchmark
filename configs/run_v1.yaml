@@ -17,11 +17,10 @@ env:
   NVSHMEM_SYMMETRIC_SIZE: "4294967296"
   NVSHMEM_REMOTE_TRANSPORT: none
   NVSHMEM_DISABLE_CUDA_VMM: "1"
-  CUDA_DEVICE_MAX_CONNECTIONS: "1"
   C_INCLUDE_PATH: /usr/local/cuda/include
   TRITON_PTXAS_PATH: /usr/local/cuda/bin/ptxas
 schemes:
-  enabled: [a1, a2, b1, b2, b3, c1]
+  enabled: [a1, a2, b1, b2, b3, c3, c4, c5]
   a1:
     tunables: {}
   a2:
@@ -32,8 +31,12 @@ schemes:
     tunables: {n_chunks_gateup: 2, n_chunks_down: 4}
   b3:
     tunables: {n_chunks_gateup: 2, n_chunks_down: 4}
-  c1:
-    tunables: {}
+  c3:
+    tunables: {fp8_rs_enabled: true}
+  c4:
+    tunables: {n_chunks_rs: 32}
+  c5:
+    tunables: {n_chunks_rs: 32}
 verify:
   enabled: true
 profile:

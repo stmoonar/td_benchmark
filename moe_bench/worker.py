@@ -38,7 +38,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     logger = get_logger(run_dir=run_dir, rank=ctx.rank, level=cfg.log.level)
     log_diagnostics(logger, cfg.log.diagnostics, lambda: _diagnostics_line(point, cfg, ctx, data))
 
-    sink = JsonlResultSink(run_dir / "results.jsonl")
+    sink = JsonlResultSink(run_dir / "results.jsonl") if ctx.rank == 0 else None
     a1_avg = None
 
     for scheme_cfg in cfg.schemes:
@@ -69,16 +69,16 @@ def main(argv: Sequence[str] | None = None) -> int:
                         encoding="utf-8",
                     )
 
-            verify_result = _verify(last_output, data, spec, cfg, ctx)
+            verify_result = _reduce_verify_across_ranks(_verify(last_output, data, spec, cfg, ctx), ctx)
 
             if code == "a1":
                 a1_avg = summary["avg"]
             speedup = (a1_avg / summary["avg"]) if a1_avg and summary["avg"] > 0 else None
 
-            row = _build_row(run_dir, point, cfg, scheme_cfg, summary, samples, verify_result, speedup)
-            sink.append(row)
-
             if ctx.rank == 0:
+                row = _build_row(run_dir, point, cfg, scheme_cfg, summary, samples, verify_result, speedup, ctx)
+                assert sink is not None
+                sink.append(row)
                 pass_str = "PASS" if verify_result["pass"] else "FAIL"
                 logger.info(
                     f"  {spec.name:40s} avg={summary['avg']:.3f} ms  "
@@ -95,9 +95,7 @@ def main(argv: Sequence[str] | None = None) -> int:
 
 # 双门阈值：EXP-021 校准值（B1-6）
 _DEFAULT_GATES: dict[str, dict[str, float]] = {
-    "golden_bf16": {"cos_threshold": 0.995, "rel_p99_threshold": 5.0, "scale_tolerance": 0.05},
     "golden_fp8sim_group128": {"cos_threshold": 0.995, "rel_p99_threshold": 5.0, "scale_tolerance": 0.05},
-    "golden_fp8sim_rowwise": {"cos_threshold": 0.99, "rel_p99_threshold": 5.0, "scale_tolerance": 0.05},
 }
 
 
@@ -105,19 +103,13 @@ def _verify(output: Any, data: DataBundle, spec: Any, cfg: RunCfg, ctx: DistCont
     if not cfg.verify_enabled:
         return {"max_abs": 0.0, "max_rel": 0.0, "cos_sim": 1.0, "rel_p99": 0.0, "rel_masked_max": 0.0, "scale": 1.0, "pass": True, "vs": "skipped"}
 
-    act_quant = spec.act_quant
-    if act_quant == "none":
-        golden_full = data.golden.bf16
-        vs = "golden_bf16"
-    elif act_quant == "group128":
-        golden_full = data.golden.fp8sim_group128
-        vs = "golden_fp8sim_group128"
-    elif act_quant == "rowwise":
-        golden_full = data.golden.fp8sim_rowwise
-        vs = "golden_fp8sim_rowwise"
-    else:
-        golden_full = data.golden.bf16
-        vs = "golden_bf16"
+    if spec.weight_dtype != "fp8" or spec.act_quant != "group128":
+        raise RuntimeError(
+            f"active benchmark scheme {spec.code} violates FP8 contract: "
+            f"weight_dtype={spec.weight_dtype}, act_quant={spec.act_quant}"
+        )
+    golden_full = data.golden.fp8sim_group128
+    vs = "golden_fp8sim_group128"
 
     m_local = output.shape[0]
     golden_local = golden_full[ctx.rank * m_local : (ctx.rank + 1) * m_local]
@@ -143,9 +135,42 @@ def _verify(output: Any, data: DataBundle, spec: Any, cfg: RunCfg, ctx: DistCont
     return result
 
 
+def _reduce_verify_across_ranks(result: dict[str, Any], ctx: DistContext) -> dict[str, Any]:
+    """Make the persisted verification gate represent every rank, not rank 0 only."""
+    if not dist.is_initialized() or ctx.world_size == 1:
+        result["world_size"] = ctx.world_size
+        return result
+
+    max_keys = ["max_abs", "max_rel", "rel_p99", "rel_masked_max"]
+    maxima = torch.tensor([float(result[key]) for key in max_keys], device=ctx.device, dtype=torch.float32)
+    dist.all_reduce(maxima, op=dist.ReduceOp.MAX)
+    for key, value in zip(max_keys, maxima.cpu().tolist(), strict=True):
+        result[key] = float(value)
+
+    minima = torch.tensor(
+        [float(result["cos_sim"]), float(result["scale"]), 1.0 if result["pass"] else 0.0],
+        device=ctx.device,
+        dtype=torch.float32,
+    )
+    maxima = torch.tensor([float(result["scale"])], device=ctx.device, dtype=torch.float32)
+    dist.all_reduce(minima, op=dist.ReduceOp.MIN)
+    dist.all_reduce(maxima, op=dist.ReduceOp.MAX)
+    result["cos_sim"] = float(minima[0].cpu())
+    result["scale_min"] = float(minima[1].cpu())
+    result["scale_max"] = float(maxima[0].cpu())
+    result["scale"] = max(
+        (result["scale_min"], result["scale_max"]),
+        key=lambda value: abs(value - 1.0),
+    )
+    result["pass"] = bool(minima[2].cpu())
+    result["world_size"] = ctx.world_size
+    return result
+
+
 def _build_row(
     run_dir: Path, point: dict, cfg: RunCfg, scheme_cfg: Any,
     summary: dict, samples: list[float], verify: dict, speedup: float | None,
+    ctx: DistContext,
 ) -> dict:
     shape = cfg.shape
     return {
@@ -154,6 +179,9 @@ def _build_row(
         "point_index": point["index"],
         "point_values": point["values"],
         "scheme": scheme_cfg.code,
+        "rank": ctx.rank,
+        "world_size": ctx.world_size,
+        "latency_aggregation": "per_iteration_max_across_ranks",
         "shape": {
             "M": shape.M,
             "K": shape.K,
@@ -163,7 +191,15 @@ def _build_row(
             "n_down": shape.n_down,
             "shared": shape.shared_experts,
         },
-        "routing": {"kind": cfg.routing.imbalance_kind},
+        "routing": {
+            "kind": cfg.routing.imbalance_kind,
+            "included_in_timing": False,
+            "contract": "gate_and_topk_precomputed",
+        },
+        "quantization": {
+            "activation": {"dtype": "fp8_e4m3fn", "granularity": "group128", "group_size": 128},
+            "weight": {"dtype": "fp8_e4m3fn", "granularity": "block", "block_shape": [128, 128]},
+        },
         "tunables": scheme_cfg.tunables,
         "shard_level": _shard_level(cfg, scheme_cfg.code),
         "lat_ms": summary,

@@ -7,7 +7,6 @@ REQUIRED_ENV_KEYS = {
     "NVSHMEM_SYMMETRIC_SIZE",
     "NVSHMEM_REMOTE_TRANSPORT",
     "NVSHMEM_DISABLE_CUDA_VMM",
-    "CUDA_DEVICE_MAX_CONNECTIONS",
     "C_INCLUDE_PATH",
     "TRITON_PTXAS_PATH",
 }
@@ -81,6 +80,19 @@ def test_env_cuda_visible_devices_is_rejected_because_dist_owns_it():
     assert "dist.cuda_visible_devices" in message
 
 
+def test_cuda_device_max_connections_is_rejected_to_preserve_runtime_default():
+    with pytest.raises(ConfigError) as excinfo:
+        load_config("configs/smoke.yaml", ["env.CUDA_DEVICE_MAX_CONNECTIONS=1"])
+
+    assert "must remain unset" in str(excinfo.value)
+
+
+@pytest.mark.parametrize("scheme", ["c1", "c2"])
+def test_bf16_triton_dist_schemes_are_disabled(scheme):
+    with pytest.raises(ConfigError):
+        load_config("configs/smoke.yaml", [f"schemes.enabled=[{scheme}]"])
+
+
 def test_expand_sweep_uses_cartesian_product_without_mutating_base():
     cfg = load_config(
         "configs/smoke.yaml",
@@ -98,7 +110,7 @@ def test_expand_sweep_uses_cartesian_product_without_mutating_base():
         (256, "none"),
         (256, "zipf"),
     ]
-    assert cfg.shape.M == 256
+    assert cfg.shape.M == 5120
 
 
 @pytest.mark.parametrize("path", ["default.yaml", "smoke.yaml", "sweep_v1.yaml", "sweep_und.yaml", "sweep_gen.yaml", "tune_c3.yaml"])
@@ -106,6 +118,8 @@ def test_shipped_configs_include_required_server_env_defaults(path):
     cfg = load_config(f"configs/{path}")
 
     assert REQUIRED_ENV_KEYS <= set(cfg.env)
+    assert "CUDA_DEVICE_MAX_CONNECTIONS" not in cfg.env
+    assert set(scheme.code for scheme in cfg.schemes).isdisjoint({"c1", "c2"})
 
 
 def test_default_config_is_annotated_template():
@@ -115,7 +129,6 @@ def test_default_config_is_annotated_template():
     assert len(comment_lines) >= 10
     for phrase in [
         "n_gateup",
-        "CUDA_DEVICE_MAX_CONNECTIONS",
         "NVSHMEM_SYMMETRIC_SIZE",
         "schemes.enabled",
         "sweep_axes",

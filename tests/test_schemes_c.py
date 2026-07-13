@@ -1,21 +1,20 @@
-import sys
-import types
+from pathlib import Path
 
-from moe_bench.config import load_config
-from moe_bench.context import DistContext
-from moe_bench.schemes import REGISTRY, build_scheme
-from moe_bench.schemes.base import validate_tunables
-from tests.test_schemes_ab import _DummyData
+import pytest
+
+from moe_bench.schemes import REGISTRY
+from moe_bench.schemes.base import SchemeConfigError, validate_tunables
 
 
-def test_c_registry_contains_all_tdx_schemes():
+def test_c_registry_contains_only_fp8_tdx_schemes():
     expected = {
-        "c1": ("TD-EP-BF16", "EP", "bf16", "none"),
-        "c2": ("TD-TP-BF16", "TP", "bf16", "none"),
-        "c3": ("TD-EP-FP8", "EP", "fp8", "rowwise"),
+        "c3": ("TD-EP-FP8", "EP", "fp8", "group128"),
         "c4": ("TD-TP-FP8", "TP", "fp8", "group128"),
         "c5": ("TD-TP-FP8-RS", "TP", "fp8", "group128"),
     }
+
+    assert "c1" not in REGISTRY
+    assert "c2" not in REGISTRY
 
     for code, (name, parallel, weight_dtype, act_quant) in expected.items():
         spec, builder = REGISTRY[code]
@@ -41,40 +40,17 @@ def test_c3_tunables_have_defaults_and_bool_validation():
     assert values["gemm_group_size_m"] == 1
 
 
-def test_c1_defaults_match_fork_sm120_tuning():
-    spec, _ = REGISTRY["c1"]
+def test_fp8_quantization_block_sizes_cannot_be_overridden():
+    spec, _ = REGISTRY["c4"]
 
-    values = validate_tunables(spec, {})
-
-    assert values["num_sm"] == 110
-    assert values["bf16_fwd_gemm_block_size_n"] == 256
-    assert values["bf16_fwd_gemm_block_size_k"] == 64
-    assert values["bf16_fwd_gemm_num_stages"] == 3
+    with pytest.raises(SchemeConfigError):
+        validate_tunables(spec, {"block_k_quant": 64})
 
 
-def test_build_c_scheme_is_import_safe_before_triton_dist_runtime():
-    cfg = load_config("configs/smoke.yaml", ["schemes.enabled=[c3]", "schemes.c3.tunables.fp8_rs_enabled=true"])
+def test_c3_source_uses_explicit_group128_activation_quantization():
+    td_common = Path("moe_bench/schemes/td_common.py").read_text(encoding="utf-8")
+    fp8_ep = Path("moe_bench/tdx/layers/fp8_ep_moe.py").read_text(encoding="utf-8")
 
-    instance = build_scheme(cfg, DistContext(), data=None, scheme_cfg=cfg.schemes[0])
-
-    assert instance.diagnostics["scheme"] == "c3"
-    assert instance.diagnostics["requires_nvshmem"] is True
-
-
-def test_c_scheme_run_calls_tdx_adapter_with_data_and_tunables(monkeypatch):
-    calls = []
-    module = types.ModuleType("moe_bench.tdx.layers.fp8_ep_moe")
-
-    def run_moe_bench_scheme(**kwargs):
-        calls.append(kwargs)
-        return "td-result"
-
-    module.run_moe_bench_scheme = run_moe_bench_scheme
-    monkeypatch.setitem(sys.modules, module.__name__, module)
-    cfg = load_config("configs/smoke.yaml", ["schemes.enabled=[c3]"])
-    instance = build_scheme(cfg, DistContext(nvshmem_initialized=True), _DummyData(), cfg.schemes[0])
-
-    assert instance.run() == "td-result"
-    assert calls[0]["scheme"] == "c3"
-    assert calls[0]["data"] is not None
-    assert calls[0]["tunables"]["fp8_rs_enabled"] is True
+    assert "_quantize_fp8_rowwise" not in td_common
+    assert "_quantize_fp8_rowwise" not in fp8_ep
+    assert "_quantize_fp8_blockwise(bundle.hidden_local, block_k=128)" in td_common

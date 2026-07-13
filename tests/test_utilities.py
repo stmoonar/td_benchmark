@@ -2,7 +2,7 @@ import logging
 import time
 
 from moe_bench.logging_util import get_logger, log_diagnostics
-from moe_bench.timing import StageTimer
+from moe_bench.timing import StageTimer, _max_across_ranks
 
 
 def test_get_logger_writes_rank_log_without_duplicate_handlers(tmp_path):
@@ -43,3 +43,46 @@ def test_stage_timer_records_elapsed_milliseconds():
 
     assert timer.elapsed_ms["sleep"] > 0
     assert isinstance(timer.elapsed_ms["sleep"], float)
+
+
+def test_distributed_samples_are_reduced_elementwise_with_max():
+    class FakeTensor:
+        def __init__(self, values):
+            self.values = list(values)
+
+        def cpu(self):
+            return self
+
+        def tolist(self):
+            return self.values
+
+    class FakeTorch:
+        float32 = "float32"
+
+        class cuda:
+            @staticmethod
+            def current_device():
+                return 0
+
+        @staticmethod
+        def tensor(values, **_kwargs):
+            return FakeTensor(values)
+
+    class FakeDist:
+        class ReduceOp:
+            MAX = "max"
+
+        @staticmethod
+        def is_initialized():
+            return True
+
+        @staticmethod
+        def get_world_size():
+            return 4
+
+        @staticmethod
+        def all_reduce(tensor, op):
+            assert op == FakeDist.ReduceOp.MAX
+            tensor.values = [1.5, 4.0, 3.25]
+
+    assert _max_across_ranks([1.0, 2.0, 3.0], FakeTorch, FakeDist) == [1.5, 4.0, 3.25]

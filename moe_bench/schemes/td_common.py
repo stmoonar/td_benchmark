@@ -53,9 +53,6 @@ FP8_TP_TUNABLES = {
     "gemm_group_size_m": TunableSpec(int, 1, "FP8 grouped GEMM M swizzle group"),
     "gemm_num_warps": TunableSpec(int, 8, "FP8 GEMM launch warps"),
     "gemm_num_stages": TunableSpec(int, 4, "FP8 GEMM launch stages"),
-    "block_k_quant": TunableSpec(int, 128, "FP8 K scale block"),
-    "block_n_quant": TunableSpec(int, 128, "FP8 N scale block"),
-    "block_quant": TunableSpec(bool, True, "Use group128 block activation quantization"),
 }
 
 
@@ -138,7 +135,7 @@ def _build_ep_bf16(module: Any, cfg: Any, ctx: Any, bundle: Any, weights: dict[s
 
 def _build_ep_fp8(module: Any, cfg: Any, ctx: Any, bundle: Any, weights: dict[str, Any], topk_ids: Any, topk_weights: Any, tunables: dict[str, Any]) -> Any:
     import torch
-    from moe_bench.tdx.layers.fp8_ep_moe import FP8_EP_MoE, _quantize_fp8_rowwise
+    from moe_bench.tdx.layers.fp8_ep_moe import FP8_EP_MoE, _quantize_fp8_blockwise
     from moe_bench.tdx.function.ep_moe_fused import TritonDistFusedFp8EpMoeFunction
     from .runtime import shared_ep
 
@@ -158,7 +155,7 @@ def _build_ep_fp8(module: Any, cfg: Any, ctx: Any, bundle: Any, weights: dict[st
     w2_scale = weights["w2_scale"]
 
     def run() -> Any:
-        hidden_fp8, hidden_scale = _quantize_fp8_rowwise(bundle.hidden_local)
+        hidden_fp8, hidden_scale = _quantize_fp8_blockwise(bundle.hidden_local, block_k=128)
         result = TritonDistFusedFp8EpMoeFunction.apply(
             cfg.shape.E, topk_weights, topk_ids, hidden_fp8, hidden_scale,
             w1, w1_scale, None, None, w2, w2_scale, ctx.group,
@@ -211,8 +208,8 @@ def _build_tp(module: Any, spec: SchemeSpec, cfg: Any, ctx: Any, bundle: Any, we
         rank=ctx.rank,
         world_size=ctx.world_size,
         group=ctx.group,
-        block_k_quant=tunables.get("block_k_quant", 128),
-        block_n_quant=tunables.get("block_n_quant", 128),
+        block_k_quant=128,
+        block_n_quant=128,
     )
     layer._init_parameters_from_bf16(
         gate_up_proj_bf16=weights["w1_bf16"].transpose(1, 2).contiguous(),

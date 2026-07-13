@@ -6,9 +6,7 @@ from . import (
     overlap_bf16,
     overlap_fp8ag,
     overlap_fp8ag_fp8rs,
-    td_ep_bf16,
     td_ep_fp8,
-    td_tp_bf16,
     td_tp_fp8,
     td_tp_fp8_rs,
     vllm_ep,
@@ -23,8 +21,8 @@ REGISTRY: dict[str, tuple[SchemeSpec, BuilderFn]] = {
     overlap_bf16.SPEC.code: (overlap_bf16.SPEC, overlap_bf16.build),
     overlap_fp8ag.SPEC.code: (overlap_fp8ag.SPEC, overlap_fp8ag.build),
     overlap_fp8ag_fp8rs.SPEC.code: (overlap_fp8ag_fp8rs.SPEC, overlap_fp8ag_fp8rs.build),
-    td_ep_bf16.SPEC.code: (td_ep_bf16.SPEC, td_ep_bf16.build),
-    td_tp_bf16.SPEC.code: (td_tp_bf16.SPEC, td_tp_bf16.build),
+    # BF16 Triton-distributed schemes c1/c2 are intentionally disabled.
+    # Keep their implementation files as historical reference only.
     td_ep_fp8.SPEC.code: (td_ep_fp8.SPEC, td_ep_fp8.build),
     td_tp_fp8.SPEC.code: (td_tp_fp8.SPEC, td_tp_fp8.build),
     td_tp_fp8_rs.SPEC.code: (td_tp_fp8_rs.SPEC, td_tp_fp8_rs.build),

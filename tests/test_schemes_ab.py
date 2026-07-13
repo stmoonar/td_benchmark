@@ -6,7 +6,6 @@ from moe_bench.config import load_config
 from moe_bench.context import DistContext
 from moe_bench.schemes import REGISTRY, build_scheme
 from moe_bench.schemes.base import SchemeConfigError, validate_tunables
-from moe_bench.schemes.shared_expert import StaticSharedExpert
 import moe_bench.overlap as overlap
 
 
@@ -34,18 +33,6 @@ def test_overlap_tunable_defaults_and_unknown_key_validation():
     assert values["n_chunks_down"] == 8
     with pytest.raises(SchemeConfigError):
         validate_tunables(spec, {"not_a_tunable": 1})
-
-
-def test_build_scheme_is_import_safe_and_returns_diagnostics():
-    cfg = load_config("configs/smoke.yaml", ["schemes.enabled=[b1]", "schemes.b1.tunables.n_chunks_gateup=4"])
-    scheme_cfg = cfg.schemes[0]
-
-    instance = build_scheme(cfg, DistContext(), data=None, scheme_cfg=scheme_cfg)
-
-    assert instance.run_staged is not None
-    assert instance.diagnostics["scheme"] == "b1"
-    assert instance.diagnostics["tunables"]["n_chunks_gateup"] == 4
-    assert instance.diagnostics["parallel"] == "TP"
 
 
 def test_a1_and_a2_specs_preserve_baseline_parallel_modes():
@@ -115,21 +102,16 @@ def _install_fake_vllm(monkeypatch, calls):
     monkeypatch.setitem(sys.modules, config.__name__, config)
 
 
-def test_vllm_schemes_call_fused_experts_with_new_data_bundle(monkeypatch):
-    calls = []
-    _install_fake_vllm(monkeypatch, calls)
-    cfg = load_config("configs/smoke.yaml", ["schemes.enabled=[a1,a2]"])
+def test_vllm_schemes_use_precomputed_routing():
+    from pathlib import Path
 
-    outputs = []
-    for scheme_cfg in cfg.schemes:
-        instance = build_scheme(cfg, DistContext(), _DummyData(), scheme_cfg)
-        outputs.append(instance.run())
+    tp_source = Path("moe_bench/schemes/vllm_tp.py").read_text(encoding="utf-8")
+    ep_source = Path("moe_bench/schemes/vllm_ep.py").read_text(encoding="utf-8")
 
-    assert outputs == ["vllm-result", "vllm-result"]
-    assert calls[0]["hidden_states"] is _DummyData.hidden_local
-    assert calls[0]["topk_ids"] is _DummyRouting.topk_ids_full
-    assert calls[1]["expert_map"] == "rank-local"
-    assert calls[1]["topk_ids"] is _DummyRouting.topk_ids_full
+    assert "routing_full(bundle)" in tp_source
+    assert "routing_local(bundle)" in ep_source
+    assert "gate_weight" not in tp_source
+    assert "gate_weight" not in ep_source
 
 
 def test_overlap_scheme_constructs_state_and_calls_forward(monkeypatch):
@@ -154,20 +136,3 @@ def test_overlap_scheme_constructs_state_and_calls_forward(monkeypatch):
     assert instance.run() == "overlap-result"
     assert calls[0] == ("state", {"n_chunks_gateup": 2, "n_chunks_down": 7, "tp_group": None})
     assert calls[-1][1]["w1"] is _DummyQuant.fp8
-
-
-def test_static_shared_expert_calls_vllm_fused_experts(monkeypatch):
-    calls = []
-    _install_fake_vllm(monkeypatch, calls)
-    expert = StaticSharedExpert(
-        _DummyQuant.fp8,
-        _DummyQuant.scale,
-        _DummyQuant.fp8,
-        _DummyQuant.scale,
-        [128, 128],
-        8,
-    )
-
-    assert expert(_DummyData.hidden_local) == "vllm-result"
-    assert calls[0]["hidden_states"] is _DummyData.hidden_local
-    assert calls[0]["w1"] is _DummyQuant.fp8

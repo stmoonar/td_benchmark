@@ -42,7 +42,7 @@ _PRESETS: dict[str, dict[str, int]] = {
     },
 }
 
-_SCHEME_CODES = {"a1", "a2", "b1", "b2", "b3", "c1", "c2", "c3", "c4", "c5"}
+_SCHEME_CODES = {"a1", "a2", "b1", "b2", "b3", "c3", "c4", "c5"}
 
 
 @dataclass(frozen=True)
@@ -197,6 +197,12 @@ class RunCfg:
             self.env.get("CUDA_VISIBLE_DEVICES"),
             "CUDA_VISIBLE_DEVICES" not in self.env,
             "must be configured through dist.cuda_visible_devices",
+        )
+        _require(
+            "env.CUDA_DEVICE_MAX_CONNECTIONS",
+            self.env.get("CUDA_DEVICE_MAX_CONNECTIONS"),
+            "CUDA_DEVICE_MAX_CONNECTIONS" not in self.env,
+            "must remain unset so the CUDA runtime default is used",
         )
         self.shape.local_E(self.dist.nproc)
         self.shape.gateup_per_tp(self.dist.nproc)

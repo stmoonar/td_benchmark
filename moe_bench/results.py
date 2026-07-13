@@ -54,9 +54,7 @@ def load_runs(pattern: str | Path) -> Any:
 
 def generate_summary(rows: Iterable[dict[str, Any]], path: str | Path) -> str:
     materialized = list(rows)
-    baseline = next((row for row in materialized if row.get("scheme") == "a1"), None)
-    baseline_med = _median_ms(baseline) if baseline else None
-    baseline_by_m = _baseline_by_m(materialized)
+    baseline_by_point = _baseline_by_point(materialized)
     verify_counts = _verify_counts(materialized)
     lines = [
         "# MoE Bench Summary",
@@ -68,7 +66,8 @@ def generate_summary(rows: Iterable[dict[str, Any]], path: str | Path) -> str:
     ]
     for row in materialized:
         med = _median_ms(row)
-        speedup = baseline_med / med if baseline_med is not None and med else None
+        baseline = baseline_by_point.get(_comparison_key(row))
+        speedup = baseline / med if baseline is not None and med else None
         verify = _verify_status(row)
         speedup_text = "n/a" if speedup is None else f"{speedup:.2f}x"
         lines.append(f"| {row.get('scheme')} | {med:.3f} | {speedup_text} | {verify} |")
@@ -83,8 +82,8 @@ def generate_summary(rows: Iterable[dict[str, Any]], path: str | Path) -> str:
     )
     for row in sorted(materialized, key=lambda item: (_shape_m(item), str(item.get("scheme")))):
         med = _median_ms(row)
-        baseline_for_m = baseline_by_m.get(_shape_m(row))
-        speedup = baseline_for_m / med if baseline_for_m is not None and med else None
+        baseline = baseline_by_point.get(_comparison_key(row))
+        speedup = baseline / med if baseline is not None and med else None
         speedup_text = "n/a" if speedup is None else f"{speedup:.2f}x"
         lines.append(f"| {_shape_m(row)} | {row.get('scheme')} | {med:.3f} | {speedup_text} | {_verify_status(row)} |")
     lines.extend(
@@ -103,7 +102,14 @@ def generate_summary(rows: Iterable[dict[str, Any]], path: str | Path) -> str:
     return summary
 
 
-def write_manifest(run_dir: str | Path, cfg: Any, points: Iterable[Any], argv: list[str] | None, effective_env: dict[str, str] | None = None) -> None:
+def write_manifest(
+    run_dir: str | Path,
+    cfg: Any,
+    points: Iterable[Any],
+    argv: list[str] | None,
+    effective_env: dict[str, str] | None = None,
+    unset_env: Iterable[str] | None = None,
+) -> None:
     path = Path(run_dir) / "manifest.json"
     env_keys = [
         "CUDA_VISIBLE_DEVICES",
@@ -115,14 +121,16 @@ def write_manifest(run_dir: str | Path, cfg: Any, points: Iterable[Any], argv: l
         "TRITON_PTXAS_PATH",
         "PYTHONPATH",
     ]
+    unset = set(unset_env or ())
     manifest = {
         "created_at": datetime.now(timezone.utc).isoformat(),
         "git_sha": _git_sha(),
         "argv": argv,
         "config": cfg.resolved_dict(),
-        "env": {key: os.environ.get(key) for key in env_keys if os.environ.get(key) is not None},
+        "env": {key: os.environ.get(key) for key in env_keys if key not in unset and os.environ.get(key) is not None},
         "configured_env": cfg.env,
         "effective_env": dict(effective_env or {}),
+        "unset_env": sorted(unset),
         "cuda_visible_devices": cfg.dist.cuda_visible_devices,
         "runtime": {
             "python": sys.version,
@@ -162,15 +170,23 @@ def _verify_status(row: dict[str, Any]) -> str:
     return verify_data.get("status") or ("PASS" if verify_data.get("pass") else "FAIL")
 
 
-def _baseline_by_m(rows: Iterable[dict[str, Any]]) -> dict[int, float]:
-    baselines: dict[int, float] = {}
+def _baseline_by_point(rows: Iterable[dict[str, Any]]) -> dict[tuple[Any, ...], float]:
+    baselines: dict[tuple[Any, ...], float] = {}
     for row in rows:
         if row.get("scheme") != "a1":
             continue
         med = _median_ms(row)
         if med is not None:
-            baselines[_shape_m(row)] = med
+            baselines[_comparison_key(row)] = med
     return baselines
+
+
+def _comparison_key(row: dict[str, Any]) -> tuple[Any, ...]:
+    """Identify rows that share shape and routing without crossing sweep points."""
+    if "point_index" in row:
+        return ("point", int(row["point_index"]))
+    point_values = json.dumps(row.get("point_values", {}), sort_keys=True, ensure_ascii=False)
+    return ("fallback", _shape_m(row), row.get("routing", {}).get("kind"), point_values)
 
 
 def _verify_counts(rows: Iterable[dict[str, Any]]) -> dict[str, int]:

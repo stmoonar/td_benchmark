@@ -30,7 +30,7 @@ def test_context_from_env_defaults_to_single_process(monkeypatch):
 
 def test_requires_nvshmem_follows_scheme_registry():
     no_nvshmem = load_config("configs/smoke.yaml", ["schemes.enabled=[a1,b1]"])
-    yes_nvshmem = load_config("configs/smoke.yaml", ["schemes.enabled=[c1]"])
+    yes_nvshmem = load_config("configs/smoke.yaml", ["schemes.enabled=[c3]"])
 
     assert requires_nvshmem(no_nvshmem) is False
     assert requires_nvshmem(yes_nvshmem) is True

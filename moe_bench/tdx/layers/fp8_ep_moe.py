@@ -72,10 +72,6 @@ def _quantize_fp8_weight_blockwise(tensor: torch.Tensor, dtype: torch.dtype = to
     return q.reshape(e, n, k).contiguous(), scale.contiguous()
 
 
-def _quantize_fp8_rowwise(tensor: torch.Tensor, dtype: torch.dtype = torch.float8_e4m3fn):
-    return _quantize_fp8_blockwise(tensor, dtype)
-
-
 def _quantize_fp8_last_dim(tensor: torch.Tensor, dtype: torch.dtype = torch.float8_e4m3fn):
     if tensor.dim() == 3:
         return _quantize_fp8_weight_blockwise(tensor, dtype)
@@ -293,7 +289,7 @@ class FP8_EP_MoE:
         hidden_states = hidden_states.view(-1, hidden_dim).to(torch.bfloat16).contiguous()
 
         routing_weights, selected_experts = self._route(hidden_states)
-        hidden_fp8, hidden_scale = _quantize_fp8_rowwise(hidden_states, self.fp8_dtype)
+        hidden_fp8, hidden_scale = _quantize_fp8_blockwise(hidden_states, self.fp8_dtype, block_k=128)
         output = TritonDistFusedFp8EpMoeFunction.apply(
             self.num_experts, routing_weights, selected_experts, hidden_fp8, hidden_scale, self.gate_up_proj,
             self.gate_up_proj_scale, None, None, self.down_proj, self.down_proj_scale, self.group)
@@ -307,7 +303,7 @@ class FP8_EP_MoE:
         hidden_states = hidden_states.view(-1, hidden_dim).to(torch.bfloat16).contiguous()
 
         routing_weights, selected_experts = self._route(hidden_states)
-        hidden_fp8, hidden_scale = _quantize_fp8_rowwise(hidden_states, self.fp8_dtype)
+        hidden_fp8, hidden_scale = _quantize_fp8_blockwise(hidden_states, self.fp8_dtype, block_k=128)
         dispatch_info = self._dispatch(hidden_fp8, hidden_scale, routing_weights, selected_experts)
         tokens_sorted = _dequantize_fp8_last_dim(dispatch_info["tokens_sorted"], dispatch_info["scales_sorted"])
 
@@ -328,7 +324,7 @@ class FP8_EP_MoE:
             gate, val = fc1.chunk(2, dim=-1)
             act = torch.nn.functional.silu(gate.float()) * val.float()
             act = (act * weights_sorted[beg:end].float().unsqueeze(-1)).to(torch.bfloat16)
-            act_fp8, act_scale = _quantize_fp8_rowwise(act, self.fp8_dtype)
+            act_fp8, act_scale = _quantize_fp8_blockwise(act, self.fp8_dtype, block_k=128)
             act_dequant = _dequantize_fp8_last_dim(act_fp8, act_scale)
             fc2_out[beg:end] = act_dequant @ down.t()
 

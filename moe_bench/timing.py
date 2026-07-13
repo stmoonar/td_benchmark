@@ -46,9 +46,14 @@ def bench_cpu(fn: Callable[[], None], warmup: int, repeat: int) -> tuple[dict[st
 
 
 def bench_cuda(fn: Callable[[], Any], warmup: int, repeat: int) -> tuple[dict[str, float], list[float], Any]:
-    """CUDA event-based timing: barrier -> warmup -> sync+barrier -> per-iter events -> sync.
+    """CUDA event timing with per-iteration slowest-rank aggregation.
 
-    Returns (summary_dict, samples_ms, last_output).
+    Every rank measures the same iteration indices locally.  After all CUDA
+    events have completed, an element-wise MAX all-reduce turns those local
+    samples into end-to-end distributed latency samples.  Consequently every
+    rank receives the same summary, while the worker only persists rank 0.
+
+    Returns (summary_dict, max_across_ranks_samples_ms, last_output).
     """
     import torch
     import torch.distributed as dist
@@ -74,8 +79,19 @@ def bench_cuda(fn: Callable[[], Any], warmup: int, repeat: int) -> tuple[dict[st
 
     torch.cuda.synchronize()
 
-    samples: list[float] = []
+    local_samples: list[float] = []
     for i in range(repeat):
-        samples.append(start_events[i].elapsed_time(end_events[i]))
+        local_samples.append(start_events[i].elapsed_time(end_events[i]))
+
+    samples = _max_across_ranks(local_samples, torch, dist)
 
     return summarize_samples(samples), samples, last_output
+
+
+def _max_across_ranks(samples_ms: list[float], torch: Any, dist: Any) -> list[float]:
+    """Return the element-wise maximum samples across the initialized group."""
+    if not dist.is_initialized() or dist.get_world_size() == 1:
+        return samples_ms
+    samples = torch.tensor(samples_ms, dtype=torch.float32, device=torch.cuda.current_device())
+    dist.all_reduce(samples, op=dist.ReduceOp.MAX)
+    return [float(value) for value in samples.cpu().tolist()]

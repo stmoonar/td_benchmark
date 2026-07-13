@@ -15,9 +15,7 @@ from .routing import RoutingBundle
 
 @dataclass
 class GoldenOutputs:
-    bf16: Any
     fp8sim_group128: Any
-    fp8sim_rowwise: Any
 
 
 @dataclass
@@ -37,9 +35,7 @@ def build_data_bundle(cfg: RunCfg, ctx: DistContext, device: Any | None = None) 
     all_gather_fn = _make_all_gather(torch, ctx)
     routing = build_routing(hidden_local, ckpt.gate_weight, cfg.routing, cfg.shape, ctx, all_gather=all_gather_fn)
     golden = GoldenOutputs(
-        bf16=_golden(hidden_full, routing, ckpt, "none"),
         fp8sim_group128=_golden(hidden_full, routing, ckpt, "group128"),
-        fp8sim_rowwise=_golden(hidden_full, routing, ckpt, "rowwise"),
     )
     return DataBundle(hidden_local=hidden_local, ckpt=ckpt, routing=routing, golden=golden)
 

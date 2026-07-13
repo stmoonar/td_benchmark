@@ -8,8 +8,6 @@ def maybe_quant_dequant(x: Any, granularity: str) -> Any:
         return x.float()
     if granularity == "group128":
         return _group_quant_dequant(x, block=128)
-    if granularity == "rowwise":
-        return _rowwise_quant_dequant(x)
     raise ValueError(f"unknown activation quantization granularity {granularity}")
 
 
@@ -117,12 +115,6 @@ def _group_quant_dequant(x: Any, block: int) -> Any:
     scale = (blocks.abs().amax(dim=-1, keepdim=True) / 448.0).clamp(min=1e-12)
     quant = (blocks / scale).clamp(-448.0, 448.0).to(torch.float8_e4m3fn).float() * scale
     return quant.view(*padded.shape)[..., :original].contiguous()
-
-
-def _rowwise_quant_dequant(x: Any) -> Any:
-    torch = _torch()
-    scale = (x.float().abs().amax(dim=-1, keepdim=True) / 448.0).clamp(min=1e-12)
-    return (x.float() / scale).clamp(-448.0, 448.0).to(torch.float8_e4m3fn).float() * scale
 
 
 def _torch() -> Any:

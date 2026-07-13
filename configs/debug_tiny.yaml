@@ -23,13 +23,12 @@ env:
   NVSHMEM_SYMMETRIC_SIZE: "4294967296"
   NVSHMEM_REMOTE_TRANSPORT: none
   NVSHMEM_DISABLE_CUDA_VMM: "1"
-  CUDA_DEVICE_MAX_CONNECTIONS: "1"
   C_INCLUDE_PATH: /usr/local/cuda/include
   TRITON_PTXAS_PATH: /usr/local/cuda/bin/ptxas
 schemes:
-  enabled: [c1]
-  c1:
-    tunables: {}
+  enabled: [c3]
+  c3:
+    tunables: {fp8_rs_enabled: true}
 verify:
   enabled: true
 profile:

@@ -2,9 +2,9 @@ run: {tag: sweep_gen, seed: 42, warmup: 10, repeat: 20, output_root: results}
 shape: {preset: gen}
 routing: {imbalance: {kind: none}}
 dist: {nproc: 4, master_port: 29500, cuda_visible_devices: "0,1,2,3"}
-env: {NVSHMEM_SYMMETRIC_SIZE: "4294967296", NVSHMEM_REMOTE_TRANSPORT: none, NVSHMEM_DISABLE_CUDA_VMM: "1", CUDA_DEVICE_MAX_CONNECTIONS: "1", C_INCLUDE_PATH: /usr/local/cuda/include, TRITON_PTXAS_PATH: /usr/local/cuda/bin/ptxas}
+env: {NVSHMEM_SYMMETRIC_SIZE: "4294967296", NVSHMEM_REMOTE_TRANSPORT: none, NVSHMEM_DISABLE_CUDA_VMM: "1", C_INCLUDE_PATH: /usr/local/cuda/include, TRITON_PTXAS_PATH: /usr/local/cuda/bin/ptxas}
 schemes:
-  enabled: [a1, a2, b1, b2, b3, c1, c2, c3, c4, c5]
+  enabled: [a1, a2, b1, b2, b3, c3, c4, c5]
 verify: {enabled: true, tolerances: {}}
 profile: {torch_profiler: false, intra_kernel: false, nvtx: true}
 log: {level: info, diagnostics: false}

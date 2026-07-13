@@ -33,6 +33,7 @@ def test_quantize_block128_matches_loop_oracle_for_ragged_shape():
 
     assert torch.equal(actual_fp8.view(torch.uint8), expected_fp8.view(torch.uint8))
     assert torch.equal(actual_scale, expected_scale)
+    assert actual_scale.shape == (2, 2, 1)
 
 
 def test_dequantize_block128_returns_bf16_view_shape():

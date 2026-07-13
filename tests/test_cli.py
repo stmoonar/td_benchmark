@@ -25,7 +25,7 @@ def test_build_worker_command_uses_torchrun_module_worker_and_point_json(tmp_pat
 def test_dry_run_lines_include_injected_env_and_command(tmp_path):
     cfg = load_config(
         "configs/smoke.yaml",
-        ["run.tag=dry", "env.CUDA_DEVICE_MAX_CONNECTIONS=1", "dist.nproc=2", "dist.cuda_visible_devices=4,5"],
+        ["run.tag=dry", "dist.nproc=2", "dist.cuda_visible_devices=4,5"],
     )
 
     lines = dry_run_lines(cfg, tmp_path)
@@ -33,7 +33,8 @@ def test_dry_run_lines_include_injected_env_and_command(tmp_path):
     text = "\n".join(lines)
     assert "run_dir=" in text
     assert "CUDA_VISIBLE_DEVICES=4,5" in text
-    assert "CUDA_DEVICE_MAX_CONNECTIONS=1" in text
+    assert "unset: CUDA_DEVICE_MAX_CONNECTIONS" in text
+    assert "CUDA_DEVICE_MAX_CONNECTIONS=" not in text
     assert "torchrun --nproc_per_node=" in text
     assert "moe_bench.worker" in text
     assert Path(tmp_path).name in text
