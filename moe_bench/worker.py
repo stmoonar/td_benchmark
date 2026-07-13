@@ -32,6 +32,13 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     cfg = run_cfg_from_dict(point["config"])
     ctx = init_context(cfg)
+    try:
+        return _run_point(run_dir, point, cfg, ctx)
+    finally:
+        finalize_context(ctx)
+
+
+def _run_point(run_dir: Path, point: dict[str, Any], cfg: RunCfg, ctx: DistContext) -> int:
     torch.cuda.set_device(ctx.device)
 
     data = build_data_bundle(cfg, ctx, device=ctx.device)
@@ -86,10 +93,14 @@ def main(argv: Sequence[str] | None = None) -> int:
                     f"{pass_str}  max_abs={verify_result['max_abs']:.6f}  rel_p99={verify_result.get('rel_p99', 0.0):.6f}  cos_sim={verify_result['cos_sim']:.8f}"
                 )
         finally:
+            try:
+                del last_output
+            except UnboundLocalError:
+                pass
             instance.close()
+            del instance
             torch.cuda.empty_cache()
 
-    finalize_context()
     return 0
 
 

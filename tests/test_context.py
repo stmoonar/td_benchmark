@@ -1,7 +1,9 @@
 import os
+import sys
+import types
 
 from moe_bench.config import load_config
-from moe_bench.context import DistContext, context_from_env, requires_nvshmem
+from moe_bench.context import DistContext, context_from_env, finalize_context, requires_nvshmem
 
 
 def test_context_from_env_parses_torchrun_environment(monkeypatch):
@@ -34,3 +36,18 @@ def test_requires_nvshmem_follows_scheme_registry():
 
     assert requires_nvshmem(no_nvshmem) is False
     assert requires_nvshmem(yes_nvshmem) is True
+
+
+def test_finalize_context_uses_triton_distributed_teardown_for_nvshmem(monkeypatch):
+    import torch
+
+    calls = []
+    fake_utils = types.ModuleType("triton_dist.utils")
+    fake_utils.finalize_distributed = lambda: calls.append("finalize_distributed")
+    monkeypatch.setitem(sys.modules, "triton_dist.utils", fake_utils)
+    monkeypatch.setattr(torch.cuda, "synchronize", lambda: calls.append("synchronize"))
+    monkeypatch.setattr("moe_bench.context.gc.collect", lambda: calls.append("gc"))
+
+    finalize_context(DistContext(nvshmem_initialized=True))
+
+    assert calls == ["synchronize", "gc", "finalize_distributed"]

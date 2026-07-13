@@ -62,7 +62,13 @@ def validate_tunables(spec: SchemeSpec, provided: dict[str, Any]) -> dict[str, A
     return values
 
 
-def make_lazy_instance(spec: SchemeSpec, tunables: dict[str, Any], run_impl: Callable[[], Any], diagnostics: dict[str, Any] | None = None) -> SchemeInstance:
+def make_lazy_instance(
+    spec: SchemeSpec,
+    tunables: dict[str, Any],
+    run_impl: Callable[[], Any],
+    diagnostics: dict[str, Any] | None = None,
+    close_impl: Callable[[], None] | None = None,
+) -> SchemeInstance:
     diag = {
         "scheme": spec.code,
         "name": spec.name,
@@ -79,7 +85,12 @@ def make_lazy_instance(spec: SchemeSpec, tunables: dict[str, Any], run_impl: Cal
     def run_staged() -> StageResult:
         return StageResult(output=run_impl(), stage_ms={})
 
-    return SchemeInstance(run=run_impl, run_staged=run_staged, diagnostics=diag, close=lambda: None)
+    return SchemeInstance(
+        run=run_impl,
+        run_staged=run_staged,
+        diagnostics=diag,
+        close=close_impl or (lambda: None),
+    )
 
 
 def missing_dependency(message: str) -> None:

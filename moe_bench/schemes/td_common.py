@@ -73,19 +73,25 @@ def build_td_instance(spec: SchemeSpec, import_target: str, cfg: Any, ctx: Any, 
     if spec.parallel == "EP":
         weights = ep_weight_views(bundle, ctx.rank, ctx.world_size)
         if spec.weight_dtype == "bf16":
-            run_fn = _build_ep_bf16(module, cfg, ctx, bundle, weights, topk_ids, topk_weights, tunables)
+            run_fn, close_fn = _build_ep_bf16(module, cfg, ctx, bundle, weights, topk_ids, topk_weights, tunables)
         else:
-            run_fn = _build_ep_fp8(module, cfg, ctx, bundle, weights, topk_ids, topk_weights, tunables)
+            run_fn, close_fn = _build_ep_fp8(module, cfg, ctx, bundle, weights, topk_ids, topk_weights, tunables)
     else:
         weights = tp_weight_views(bundle, ctx.rank, ctx.world_size)
-        run_fn = _build_tp(module, spec, cfg, ctx, bundle, weights, tunables)
+        run_fn, close_fn = _build_tp(module, spec, cfg, ctx, bundle, weights, tunables)
 
     if os.environ.get("MOE_BENCH_TDX_AUDIT") == "1":
         import sys as _sys
         for name in sorted(n for n in _sys.modules if n.startswith(("triton_dist", "moe_bench.tdx"))):
             print(f"TDX-AUDIT {name} -> {getattr(_sys.modules[name], '__file__', None)}", flush=True)
 
-    return make_lazy_instance(spec, tunables, run_fn, diagnostics={"tdx_import": import_target})
+    return make_lazy_instance(
+        spec,
+        tunables,
+        run_fn,
+        diagnostics={"tdx_import": import_target},
+        close_impl=close_fn,
+    )
 
 
 def _run_with_tdx_layer(spec: SchemeSpec, module: Any, cfg: Any, ctx: Any, data: Any, tunables: dict[str, Any]) -> Any:
@@ -130,7 +136,7 @@ def _build_ep_bf16(module: Any, cfg: Any, ctx: Any, bundle: Any, weights: dict[s
             result = result + shared(bundle.hidden_local)
         return result
 
-    return run
+    return run, moe.finalize
 
 
 def _build_ep_fp8(module: Any, cfg: Any, ctx: Any, bundle: Any, weights: dict[str, Any], topk_ids: Any, topk_weights: Any, tunables: dict[str, Any]) -> Any:
@@ -164,7 +170,7 @@ def _build_ep_fp8(module: Any, cfg: Any, ctx: Any, bundle: Any, weights: dict[st
             result = result + shared(bundle.hidden_local)
         return result
 
-    return run
+    return run, fp8_moe.finalize
 
 
 def _build_tp(module: Any, spec: SchemeSpec, cfg: Any, ctx: Any, bundle: Any, weights: dict[str, Any], tunables: dict[str, Any]) -> Any:
@@ -199,7 +205,7 @@ def _build_tp(module: Any, spec: SchemeSpec, cfg: Any, ctx: Any, bundle: Any, we
             if shared is not None:
                 result = result + shared(bundle.hidden_local)
             return result
-        return run
+        return run, moe.finalize
 
     cls_name = "FP8_TP_MoE_FP8RS" if spec.code == "c5" else "FP8_TP_MoE"
     layer_module = importlib.import_module("moe_bench.tdx.layers.fp8_tp_moe")
@@ -233,4 +239,4 @@ def _build_tp(module: Any, spec: SchemeSpec, cfg: Any, ctx: Any, bundle: Any, we
         if shared is not None:
             result = result + shared(bundle.hidden_local)
         return result
-    return run
+    return run, layer.finalize

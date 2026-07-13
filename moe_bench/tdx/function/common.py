@@ -300,15 +300,30 @@ def deinit_triton_dist_ep_op(ep_implementation: str = "mega"):
     global triton_dist_ep_op2
 
     if ep_implementation in ["mega", "mega_recomp"]:
-        MAX_TOKENS_PER_RANK = None
-        triton_dist_ep_op = None
+        ops = [triton_dist_ep_op] if triton_dist_ep_op is not None else []
     elif ep_implementation == "split_mbs":
-        MAX_TOKENS_PER_RANK = None
-        triton_dist_ep_op1 = None
-        triton_dist_ep_op2 = None
+        ops = [op for op in (triton_dist_ep_op1, triton_dist_ep_op2) if op is not None]
     else:
         raise ValueError(
             f"Invalid ep_implementation: {ep_implementation}, expected: ['triton_dist', 'mega_recomp', 'split_mbs']")
+
+    if ops:
+        torch.cuda.synchronize()
+        if torch.distributed.is_initialized():
+            torch.distributed.barrier()
+        for op in ops:
+            op.finalize()
+        torch.cuda.synchronize()
+        if torch.distributed.is_initialized():
+            torch.distributed.barrier()
+
+    if ep_implementation in ["mega", "mega_recomp"]:
+        MAX_TOKENS_PER_RANK = None
+        triton_dist_ep_op = None
+    else:
+        MAX_TOKENS_PER_RANK = None
+        triton_dist_ep_op1 = None
+        triton_dist_ep_op2 = None
 
 
 def init_triton_dist_ep_ctx(

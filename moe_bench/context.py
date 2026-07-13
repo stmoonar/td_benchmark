@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import gc
 import os
 from typing import Any
 
@@ -45,7 +46,16 @@ def init_context(cfg: Any | None = None, device: Any | None = None) -> DistConte
     return _init_nccl_context(device)
 
 
-def finalize_context() -> None:
+def finalize_context(ctx: DistContext | None = None) -> None:
+    if ctx is not None and ctx.nvshmem_initialized:
+        import torch
+        from triton_dist.utils import finalize_distributed
+
+        torch.cuda.synchronize()
+        gc.collect()
+        finalize_distributed()
+        return
+
     import torch.distributed as dist
     if dist.is_initialized():
         dist.destroy_process_group()
